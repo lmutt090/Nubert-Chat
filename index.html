@@ -1,0 +1,78 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IRC Chat with DMs</title>
+</head>
+<body>
+    <h1>IRC Chat</h1>
+    <input type="text" id="username" placeholder="Enter username">
+    <button onclick="joinChat()">Join</button>
+    <div id="idDisplay"></div>
+
+    <h2>Online Users</h2>
+    <select id="dmTarget">
+        <option value="">Public Chat</option>
+    </select>
+
+    <div id="chatBox" style="border:1px solid #ccc; padding:10px; margin-top:10px; height:200px; overflow:auto;"></div>
+    <input type="text" id="messageInput" placeholder="Enter message">
+    <button onclick="sendMessage()">Send</button>
+
+    <script>
+        let ws;
+        let username = '';
+
+        function joinChat() {
+            username = document.getElementById('username').value;
+            ws = new WebSocket('ws://localhost:3000');
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ type: 'join', username }));
+            };
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'id') {
+                    document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
+                } else if (data.type === 'chat') {
+                    appendMessage(`${data.username}: ${data.message}`);
+                } else if (data.type === 'dm') {
+                    appendMessage(`(DM from ${data.from}): ${data.message}`);
+                } else if (data.type === 'userlist') {
+                    updateUserList(data.users);
+                }
+            };
+        }
+
+        function sendMessage() {
+            const msg = document.getElementById('messageInput').value;
+            const target = document.getElementById('dmTarget').value;
+
+            if (target && target !== username) {
+                ws.send(JSON.stringify({ type: 'dm', to: target, message: msg }));
+                appendMessage(`(DM to ${target}): ${msg}`);
+            } else {
+                ws.send(JSON.stringify({ type: 'chat', message: msg }));
+            }
+
+            document.getElementById('messageInput').value = '';
+        }
+
+        function appendMessage(msg) {
+            const box = document.getElementById('chatBox');
+            box.innerHTML += `<p>${msg}</p>`;
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function updateUserList(users) {
+            const select = document.getElementById('dmTarget');
+            select.innerHTML = '<option value="">Public Chat</option>';
+            users.forEach(user => {
+                if (user !== username) {
+                    select.innerHTML += `<option value="${user}">${user}</option>`;
+                }
+            });
+        }
+    </script>
+</body>
+</html>
