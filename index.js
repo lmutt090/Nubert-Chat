@@ -38,7 +38,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
             is_owner INTEGER DEFAULT 0,
             is_banned INTEGER DEFAULT 0,
             is_muted INTEGER DEFAULT 0,
-            is_whitelisted INTEGER DEFAULT 0
+            is_whitelisted INTEGER DEFAULT 0,
+            is_user_able_to_be_blocked INTEGER DEFAULT 1
         )`, () => {
             if (isFirstRun) {
                 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -211,12 +212,17 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'error', message: 'You are muted and cannot chat.' }));
                 return;
             }
-            db.run(`INSERT INTO messages (type, sender, message) VALUES (?, ?, ?)`, ['chat', user, data.message]);
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'chat', username: user, message: data.message }));
-                }
-            });
+
+            if (data.message.startsWith('/')) {
+                handleCommand(data.message, user, ws);
+            } else {
+                db.run(`INSERT INTO messages (type, sender, message) VALUES (?, ?, ?)`, ['chat', user, data.message]);
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({ type: 'chat', username: user, message: data.message }));
+                    }
+                });
+            }
         }
 
         else if (data.type === 'dm') {
@@ -384,6 +390,32 @@ wss.on('connection', (ws) => {
                 }
             });
         }
+
+        else if (data.type === 'block') {
+            const { targetUser } = data;
+            if (user && targetUser) {
+                db.run(`INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)`, [user, targetUser], (err) => {
+                    if (err) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to block user.' }));
+                    } else {
+                        ws.send(JSON.stringify({ type: 'success', message: `${targetUser} has been blocked.` }));
+                    }
+                });
+            }
+        }
+
+        else if (data.type === 'unblock') {
+            const { targetUser } = data;
+            if (user && targetUser) {
+                db.run(`DELETE FROM blocks WHERE blocker = ? AND blocked = ?`, [user, targetUser], (err) => {
+                    if (err) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to unblock user.' }));
+                    } else {
+                        ws.send(JSON.stringify({ type: 'success', message: `${targetUser} has been unblocked.` }));
+                    }
+                });
+            }
+        }
     });
 
     ws.on('close', () => {
@@ -425,4 +457,64 @@ if (localTunnelEnabled) {
             console.log('Tunnel closed');
         });
     })();
+}
+
+function handleCommand(command, user, ws) {
+    const [cmd, ...args] = command.slice(1).split(' ');
+
+    switch (cmd.toLowerCase()) {
+        case 'help':
+            ws.send(JSON.stringify({ type: 'chat', username: 'System', message: 'Available commands: /help, /whisper <user> <message>, /me <action>, /block <user>, /unblock, <user>' }));
+            break;
+        case 'whisper':
+            const targetUser = args.shift();
+            const privateMessage = args.join(' ');
+            const targetWs = clients.get(targetUser);
+
+            if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+                targetWs.send(JSON.stringify({ type: 'chat', username: `(whisper) ${user}`, message: privateMessage }));
+                ws.send(JSON.stringify({ type: 'chat', username: `(whisper to ${targetUser})`, message: privateMessage }));
+            } else {
+                ws.send(JSON.stringify({ type: 'error', message: 'User not found or offline.' }));
+            }
+            break;
+        case 'me':
+            const actionMessage = args.join(' ');
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'chat', username: 'Action', message: `${user} ${actionMessage}` }));
+                }
+            });
+            break;
+        case 'block':
+            const blockTarget = args[0];
+            if (!blockTarget) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user to block.' }));
+                return;
+            }
+            db.run(`INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)`, [user, blockTarget], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to block user.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have blocked ${blockTarget}.` }));
+                }
+            });
+            break;
+        case 'unblock':
+            const unblockTarget = args[0];
+            if (!unblockTarget) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user to unblock.' }));
+                return;
+            }
+            db.run(`DELETE FROM blocks WHERE blocker = ? AND blocked = ?`, [user, unblockTarget], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to unblock user.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have unblocked ${unblockTarget}.` }));
+                }
+            });
+            break;
+        default:
+            ws.send(JSON.stringify({ type: 'error', message: 'Unknown command. Type /help for a list of commands.' }));
+    }
 }

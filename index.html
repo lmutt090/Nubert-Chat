@@ -19,7 +19,7 @@
         <h2>Navigation</h2>
         <button onclick="goToDMPage()">Direct Messages</button>
         <!--<button onclick="goToGroupPage()">Group Messages</button> keep hidden until ready, it buggy.-->
-        <button onclick="goToMainPage()">Main Chat</button>
+        <!--<button onclick="goToMainPage()">Main Chat</button> this is the main chat already lmao.-->
         <h2>Online Users</h2>
         <ul id="dmTarget" style="list-style-type: none; padding: 0; max-height: 150px; overflow-y: auto;">
             <!-- Online users or groups will be dynamically added here -->
@@ -94,6 +94,35 @@
                     };
                     dmUserList.appendChild(li);
                 });
+            }
+
+            function addNewDMUser(username) {
+                const dmUserList = document.getElementById('dmUserList');
+                const li = document.createElement('li');
+                li.textContent = username;
+                li.onclick = () => {
+                    lastRecipient = username; // Set the clicked user as the recipient
+                    fetchDMMessages(username); // Fetch messages for the selected user
+                };
+                dmUserList.appendChild(li);
+            }
+
+            function startNewDM() {
+                const recipient = prompt('Enter the username of the user you want to DM:');
+
+                if (!recipient) {
+                    alert('Recipient username is required.');
+                    return;
+                }
+
+                // Add the new user to the DM list if not already present
+                if (!Array.from(document.getElementById('dmUserList').children).some(li => li.textContent === recipient)) {
+                    addNewDMUser(recipient);
+                }
+
+                // Set the recipient as the active DM and fetch their messages
+                lastRecipient = recipient;
+                fetchDMMessages(recipient);
             }
         </script>
     </div>
@@ -322,12 +351,41 @@
             appendDMHistory(`${username}: ${message}`); // Updated to show sender username
             document.getElementById('dmMessageInput').value = '';
 
+            if (!Array.from(document.getElementById('dmUserList').children).some(li => li.textContent === recipient)) {
+                addNewDMUser(recipient); // Add the new user to the DM list if not already present
+            }
+
             lastRecipient = recipient; // Remember the last recipient
         }
 
         function appendDMHistory(message) {
             const dmHistory = document.getElementById('dmHistory');
-            dmHistory.innerHTML += `<p>${message}</p>`;
+
+            // Check if the message contains an image URL or a Tenor GIF URL
+            const imageRegex = /(https?:\/\/.+\.(?:png|jpg|jpeg|gif))/i;
+            const tenorRegex = /(https?:\/\/tenor\.com\/view\/.+)/i;
+
+            if (imageRegex.test(message)) {
+                const img = document.createElement('img');
+                img.src = message.match(imageRegex)[0];
+                img.alt = 'Embedded Image';
+                img.style.maxWidth = '100%';
+                img.style.marginTop = '10px';
+                dmHistory.appendChild(img);
+            } else if (tenorRegex.test(message)) {
+                const iframe = document.createElement('iframe');
+                iframe.src = message.match(tenorRegex)[0];
+                iframe.width = '100%';
+                iframe.height = '200';
+                iframe.style.border = 'none';
+                iframe.allow = 'autoplay';
+                dmHistory.appendChild(iframe);
+            } else {
+                const messageElement = document.createElement('p');
+                messageElement.textContent = message;
+                dmHistory.appendChild(messageElement);
+            }
+
             dmHistory.scrollTop = dmHistory.scrollHeight;
         }
 
@@ -340,7 +398,32 @@
 
         function appendGroupHistory(message) {
             const groupHistory = document.getElementById('groupHistory');
-            groupHistory.innerHTML += `<p>${message}</p>`;
+
+            // Check if the message contains an image URL or a Tenor GIF URL
+            const imageRegex = /(https?:\/\/.+\.(?:png|jpg|jpeg|gif))/i;
+            const tenorRegex = /(https?:\/\/tenor\.com\/view\/.+)/i;
+
+            if (imageRegex.test(message)) {
+                const img = document.createElement('img');
+                img.src = message.match(imageRegex)[0];
+                img.alt = 'Embedded Image';
+                img.style.maxWidth = '100%';
+                img.style.marginTop = '10px';
+                groupHistory.appendChild(img);
+            } else if (tenorRegex.test(message)) {
+                const iframe = document.createElement('iframe');
+                iframe.src = message.match(tenorRegex)[0];
+                iframe.width = '100%';
+                iframe.height = '200';
+                iframe.style.border = 'none';
+                iframe.allow = 'autoplay';
+                groupHistory.appendChild(iframe);
+            } else {
+                const messageElement = document.createElement('p');
+                messageElement.textContent = message;
+                groupHistory.appendChild(messageElement);
+            }
+
             groupHistory.scrollTop = groupHistory.scrollHeight;
         }
 
