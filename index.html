@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,41 +6,72 @@
 </head>
 <body>
     <h1>IRC Chat</h1>
-    <input type="text" id="username" placeholder="Enter username">
-    <button onclick="joinChat()">Join</button>
-    <div id="idDisplay"></div>
 
-    <h2>Online Users</h2>
-    <select id="dmTarget">
-        <option value="">Public Chat</option>
-    </select>
+    <div id="authSection">
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="register()">Register</button>
+        <button onclick="login()">Login</button>
+    </div>
 
-    <div id="chatBox" style="border:1px solid #ccc; padding:10px; margin-top:10px; height:200px; overflow:auto;"></div>
-    <input type="text" id="messageInput" placeholder="Enter message">
-    <button onclick="sendMessage()">Send</button>
+    <div id="chatSection" style="display:none;">
+        <div id="idDisplay"></div>
+        <h2>Online Users</h2>
+        <select id="dmTarget">
+            <option value="">Public Chat</option>
+        </select>
+
+        <div id="chatBox" style="border:1px solid #ccc; padding:10px; margin-top:10px; height:200px; overflow:auto;"></div>
+        <input type="text" id="messageInput" placeholder="Enter message">
+        <button onclick="sendMessage()">Send</button>
+    </div>
 
     <script>
         let ws;
         let username = '';
 
-        function joinChat() {
+        function register() {
             username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
             ws = new WebSocket('ws://localhost:3000');
+
             ws.onopen = () => {
-                ws.send(JSON.stringify({ type: 'join', username }));
+                ws.send(JSON.stringify({ type: 'register', username, password }));
             };
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'id') {
-                    document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
-                } else if (data.type === 'chat') {
-                    appendMessage(`${data.username}: ${data.message}`);
-                } else if (data.type === 'dm') {
-                    appendMessage(`(DM from ${data.from}): ${data.message}`);
-                } else if (data.type === 'userlist') {
-                    updateUserList(data.users);
-                }
+
+            ws.onmessage = handleMessage;
+        }
+
+        function login() {
+            username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            ws = new WebSocket('ws://localhost:3000');
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ type: 'login', username, password }));
             };
+
+            ws.onmessage = handleMessage;
+        }
+
+        function handleMessage(event) {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'error') {
+                alert(data.message);
+            } else if (data.type === 'login-success') {
+                document.getElementById('authSection').style.display = 'none';
+                document.getElementById('chatSection').style.display = 'block';
+                document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
+            } else if (data.type === 'register-success') {
+                alert('Registration successful. Please log in.');
+            } else if (data.type === 'chat') {
+                appendMessage(`${data.username}: ${data.message}`);
+            } else if (data.type === 'dm') {
+                appendMessage(`(DM from ${data.from}): ${data.message}`);
+            } else if (data.type === 'userlist') {
+                updateUserList(data.users);
+            }
         }
 
         function sendMessage() {
