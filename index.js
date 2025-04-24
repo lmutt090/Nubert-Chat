@@ -227,6 +227,24 @@ wss.on('connection', (ws) => {
             }
         }
 
+        else if (data.type === 'fetch-dm-messages') {
+            const { targetUser } = data;
+            if (user) {
+                db.all(
+                    `SELECT sender, receiver, message, timestamp FROM messages WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?) ORDER BY timestamp ASC`,
+                    [user, targetUser, targetUser, user],
+                    (err, rows) => {
+                        if (err) {
+                            console.error('Error fetching DM messages:', err);
+                            ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch messages.' }));
+                        } else {
+                            ws.send(JSON.stringify({ type: 'dm-messages', targetUser, messages: rows }));
+                        }
+                    }
+                );
+            }
+        }
+
         else if (data.type === 'kick' && (isAdmin || isOwner)) {
             const target = clients.get(data.target);
             if (target && target.readyState === WebSocket.OPEN) {
