@@ -32,7 +32,7 @@
             <button onclick="createGroupChat()">Create Group Chat</button>
         </div>
 
-        <h3>Admin Tools (Only available for admins and owners)</h3>
+        <h3 id="adminTools" style="display:none;">Admin Tools (Only available for admins and owners)</h3>
         <div id="adminTools" style="display:none;">
             <button onclick="banUser()">Ban User</button>
             <button onclick="unbanUser()">Unban User</button>
@@ -106,7 +106,7 @@
         <button onclick="generateInviteLink()">Generate Invite Link</button>
         <button onclick="goToMainPage()">Back to Main</button>
 
-        <h3>Group Management (Owner Only)</h3>
+        <h3 id="groupManagement" style="display:none;">Group Management (Owner Only)</h3>
         <div id="groupManagement" style="display:none;">
             <button onclick="addModerator()">Add Moderator</button>
             <button onclick="kickFromGroup()">Kick User</button>
