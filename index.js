@@ -15,6 +15,7 @@ const clients = new Map(); // username => ws
 const dbPath = path.join(__dirname, 'NubNub.db');
 const isFirstRun = !fs.existsSync(dbPath);
 let whitelistEnabled = true;
+let localTunnelEnabled = process.env.LOCALTUNNEL === 'false'; // Enable LocalTunnel if the environment variable is set
 
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
@@ -224,3 +225,20 @@ app.use(express.static(__dirname));
 server.on('request', app);
 
 server.listen(3000, () => console.log('Server running on port 3000'));
+
+if (localTunnelEnabled) {
+    const localtunnel = require('localtunnel');
+
+    (async () => {
+        const tunnel = await localtunnel({ port: 3000 });
+
+        console.log(`Server is publicly accessible at ${tunnel.url}`);
+
+        // Update the environment variable with the tunnel URL
+        process.env.LOCALTUNNEL_URL = tunnel.url;
+
+        tunnel.on('close', () => {
+            console.log('Tunnel closed');
+        });
+    })();
+}

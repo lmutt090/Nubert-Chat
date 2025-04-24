@@ -45,7 +45,11 @@
 
         function getWebSocketURL() {
             const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            return protocol + window.location.host;
+            const host = window.location.host;
+            const localTunnelURL = window.LOCALTUNNEL_URL || null; // Use the LocalTunnel URL if available
+
+            // Use LocalTunnel URL if specified, otherwise fallback to the current host
+            return localTunnelURL ? localTunnelURL.replace('http', 'ws') : protocol + host;
         }
 
         function register() {
