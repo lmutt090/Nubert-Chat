@@ -18,7 +18,7 @@
         <div id="idDisplay"></div>
         <h2>Navigation</h2>
         <button onclick="goToDMPage()">Direct Messages</button>
-        <button onclick="goToGroupPage()">Group Messages</button>
+        <!--<button onclick="goToGroupPage()">Group Messages</button> keep hidden until ready, it buggy.-->
         <button onclick="goToMainPage()">Main Chat</button>
         <h2>Online Users</h2>
         <ul id="dmTarget" style="list-style-type: none; padding: 0; max-height: 150px; overflow-y: auto;">
@@ -66,6 +66,22 @@
         </div>
 
         <script>
+            function fetchDMMessages(targetUser) {
+                ws.send(JSON.stringify({ type: 'fetch-dm-messages', targetUser }));
+            }
+
+            function handleDMMessages(data) {
+                const { targetUser, messages } = data;
+                const chatBox = document.getElementById('dmHistory'); // Use the existing chatbox
+
+                chatBox.innerHTML = ''; // Clear the chatbox when switching users
+                messages.forEach(msg => {
+                    const messageElement = document.createElement('p');
+                    messageElement.textContent = `${msg.sender}: ${msg.message}`;
+                    chatBox.appendChild(messageElement);
+                });
+            }
+
             function updateDMUserList(users) {
                 const dmUserList = document.getElementById('dmUserList');
                 dmUserList.innerHTML = '';
@@ -74,7 +90,7 @@
                     li.textContent = user;
                     li.onclick = () => {
                         lastRecipient = user; // Set the clicked user as the recipient
-                        alert(`You are now messaging ${user}`);
+                        fetchDMMessages(user); // Fetch messages for the selected user
                     };
                     dmUserList.appendChild(li);
                 });
@@ -156,13 +172,19 @@
             } else if (data.type === 'chat') {
                 appendMessage(`${data.username}: ${data.message}`);
             } else if (data.type === 'dm') {
-                appendDMHistory(`(DM from ${data.from}): ${data.message}`);
+                if (data.from === lastRecipient || data.to === lastRecipient) {
+                    appendDMHistory(`${data.from}: ${data.message}`);
+                } else {
+                    // Ignore messages not related to the current DM recipient
+                }
             } else if (data.type === 'userlist') {
                 updateUserList(data.users);
             } else if (data.type === 'admin-update') {
                 alert(data.message);
             } else if (data.type === 'dm-history') {
                 updateDMUserList(data.users);
+            } else if (data.type === 'dm-messages') {
+                handleDMMessages(data);
             }
         }
 
@@ -297,7 +319,7 @@
 
             // Logic to send DM via WebSocket
             ws.send(JSON.stringify({ type: 'dm', to: recipient, message }));
-            appendDMHistory(`You to ${recipient}: ${message}`);
+            appendDMHistory(`${username}: ${message}`); // Updated to show sender username
             document.getElementById('dmMessageInput').value = '';
 
             lastRecipient = recipient; // Remember the last recipient
