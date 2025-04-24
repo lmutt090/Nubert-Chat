@@ -43,10 +43,15 @@
         let isAdmin = false;
         let isOwner = false;
 
+        function getWebSocketURL() {
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            return protocol + window.location.host;
+        }
+
         function register() {
             username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            ws = new WebSocket('ws://localhost:3000');
+            ws = new WebSocket(getWebSocketURL());
 
             ws.onopen = () => {
                 ws.send(JSON.stringify({ type: 'register', username, password }));
@@ -58,7 +63,7 @@
         function login() {
             username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            ws = new WebSocket('ws://localhost:3000');
+            ws = new WebSocket(getWebSocketURL());
 
             ws.onopen = () => {
                 ws.send(JSON.stringify({ type: 'login', username, password }));

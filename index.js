@@ -5,6 +5,8 @@ const path = require('path');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const readline = require('readline');
+const express = require('express');
+const app = express();
 
 const server = http.createServer();
 const wss = new WebSocket.Server({ server });
@@ -214,5 +216,11 @@ function broadcastUserList() {
         }
     });
 }
+
+// Serve static files from the current directory
+app.use(express.static(__dirname));
+
+// Use the Express app to handle HTTP requests
+server.on('request', app);
 
 server.listen(3000, () => console.log('Server running on port 3000'));
