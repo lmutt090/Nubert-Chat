@@ -16,10 +16,21 @@
 
     <div id="chatSection" style="display:none;">
         <div id="idDisplay"></div>
+        <h2>Navigation</h2>
+        <button onclick="goToDMPage()">Direct Messages</button>
+        <button onclick="goToGroupPage()">Group Messages</button>
+        <button onclick="goToMainPage()">Main Chat</button>
         <h2>Online Users</h2>
-        <select id="dmTarget">
-            <option value="">Public Chat</option>
-        </select>
+        <ul id="dmTarget" style="list-style-type: none; padding: 0; max-height: 150px; overflow-y: auto;">
+            <!-- Online users or groups will be dynamically added here -->
+        </ul>
+        <div id="groupOptions" style="display: none;">
+            <h3>Your Groups</h3>
+            <ul id="groupList" style="list-style-type: none; padding: 0; max-height: 100px; overflow-y: auto;">
+                <!-- Group chats will be dynamically added here -->
+            </ul>
+            <button onclick="createGroupChat()">Create Group Chat</button>
+        </div>
 
         <h3>Admin Tools (Only available for admins and owners)</h3>
         <div id="adminTools" style="display:none;">
@@ -37,11 +48,63 @@
         <button onclick="sendMessage()">Send</button>
     </div>
 
+    <div id="dmPage" style="display:none;">
+        <h2>Direct Messages</h2>
+        <div style="display: flex;">
+            <div style="width: 20%; border-right: 1px solid #ccc; padding: 10px;">
+                <h3>DM History</h3>
+                <ul id="dmUserList" style="list-style-type: none; padding: 0; max-height: 200px; overflow-y: auto;">
+                    <!-- List of users they have DMed or been DMed by will be dynamically added here -->
+                </ul>
+            </div>
+            <div style="width: 80%; padding: 10px;">
+                <div id="dmHistory" style="border:1px solid #ccc; padding:10px; height:200px; overflow:auto;"></div>
+                <input type="text" id="dmMessageInput" placeholder="Enter message">
+                <button onclick="sendDM()">Send DM</button>
+                <button onclick="goToMainPage()">Back to Main</button>
+            </div>
+        </div>
+
+        <script>
+            function updateDMUserList(users) {
+                const dmUserList = document.getElementById('dmUserList');
+                dmUserList.innerHTML = '';
+                users.forEach(user => {
+                    const li = document.createElement('li');
+                    li.textContent = user;
+                    li.onclick = () => {
+                        lastRecipient = user; // Set the clicked user as the recipient
+                        alert(`You are now messaging ${user}`);
+                    };
+                    dmUserList.appendChild(li);
+                });
+            }
+        </script>
+    </div>
+
+    <div id="groupPage" style="display:none;">
+        <h2>Group Messages</h2>
+        <div id="groupHistory" style="border:1px solid #ccc; padding:10px; height:200px; overflow:auto;"></div>
+        <input type="text" id="groupMessageInput" placeholder="Enter message">
+        <button onclick="sendGroupMessage()">Send Message</button>
+        <button onclick="generateInviteLink()">Generate Invite Link</button>
+        <button onclick="goToMainPage()">Back to Main</button>
+
+        <h3>Group Management (Owner Only)</h3>
+        <div id="groupManagement" style="display:none;">
+            <button onclick="addModerator()">Add Moderator</button>
+            <button onclick="kickFromGroup()">Kick User</button>
+            <button onclick="banFromGroup()">Ban User</button>
+            <button onclick="muteInGroup()">Mute User</button>
+        </div>
+    </div>
+
     <script>
         let ws;
         let username = '';
         let isAdmin = false;
         let isOwner = false;
+        let lastRecipient = '';
 
         function getWebSocketURL() {
             const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -93,17 +156,30 @@
             } else if (data.type === 'chat') {
                 appendMessage(`${data.username}: ${data.message}`);
             } else if (data.type === 'dm') {
-                appendMessage(`(DM from ${data.from}): ${data.message}`);
+                appendDMHistory(`(DM from ${data.from}): ${data.message}`);
             } else if (data.type === 'userlist') {
                 updateUserList(data.users);
             } else if (data.type === 'admin-update') {
                 alert(data.message);
+            } else if (data.type === 'dm-history') {
+                updateDMUserList(data.users);
             }
         }
 
         function toggleAdminTools() {
+            const adminTools = document.getElementById('adminTools');
+            const groupManagement = document.getElementById('groupManagement');
+
             if (isAdmin || isOwner) {
-                document.getElementById('adminTools').style.display = 'block';
+                adminTools.style.display = 'block';
+            } else {
+                adminTools.style.display = 'none';
+            }
+
+            if (isOwner) {
+                groupManagement.style.display = 'block';
+            } else {
+                groupManagement.style.display = 'none';
             }
         }
 
@@ -128,11 +204,11 @@
         }
 
         function updateUserList(users) {
-            const select = document.getElementById('dmTarget');
-            select.innerHTML = '<option value="">Public Chat</option>';
+            const ul = document.getElementById('dmTarget');
+            ul.innerHTML = '';
             users.forEach(user => {
                 if (user !== username) {
-                    select.innerHTML += `<option value="${user}">${user}</option>`;
+                    ul.innerHTML += `<li>${user}</li>`;
                 }
             });
         }
@@ -184,6 +260,92 @@
             if (target) {
                 ws.send(JSON.stringify({ type: 'unwhitelist', target }));
             }
+        }
+
+        function goToDMPage() {
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'none';
+            document.getElementById('groupPage').style.display = 'none'; // Ensure group page is hidden
+            document.getElementById('dmPage').style.display = 'block';
+        }
+
+        function goToGroupPage() {
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'none';
+            document.getElementById('dmPage').style.display = 'none'; // Ensure DM page is hidden
+            document.getElementById('groupPage').style.display = 'block';
+        }
+
+        function goToMainPage() {
+            document.getElementById('dmPage').style.display = 'none';
+            document.getElementById('groupPage').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'block';
+        }
+
+        function sendDM() {
+            const recipient = lastRecipient || prompt('Enter the username of the recipient:');
+
+            if (!recipient) {
+                alert('Recipient username is required.');
+                return;
+            }
+
+            const message = document.getElementById('dmMessageInput').value;
+
+            // Logic to send DM via WebSocket
+            ws.send(JSON.stringify({ type: 'dm', to: recipient, message }));
+            appendDMHistory(`You to ${recipient}: ${message}`);
+            document.getElementById('dmMessageInput').value = '';
+
+            lastRecipient = recipient; // Remember the last recipient
+        }
+
+        function appendDMHistory(message) {
+            const dmHistory = document.getElementById('dmHistory');
+            dmHistory.innerHTML += `<p>${message}</p>`;
+            dmHistory.scrollTop = dmHistory.scrollHeight;
+        }
+
+        function sendGroupMessage() {
+            const message = document.getElementById('groupMessageInput').value;
+            // Logic to send group message via WebSocket
+            appendGroupHistory(`You: ${message}`);
+            document.getElementById('groupMessageInput').value = '';
+        }
+
+        function appendGroupHistory(message) {
+            const groupHistory = document.getElementById('groupHistory');
+            groupHistory.innerHTML += `<p>${message}</p>`;
+            groupHistory.scrollTop = groupHistory.scrollHeight;
+        }
+
+        function generateInviteLink() {
+            // Logic to generate invite link for the group
+            alert('Invite link generated: [link]');
+        }
+
+        function addModerator() {
+            const username = prompt('Enter username to make a moderator:');
+            // Logic to add moderator
+            alert(`${username} is now a moderator.`);
+        }
+
+        function kickFromGroup() {
+            const username = prompt('Enter username to kick:');
+            // Logic to kick user from group
+            alert(`${username} has been kicked from the group.`);
+        }
+
+        function banFromGroup() {
+            const username = prompt('Enter username to ban:');
+            // Logic to ban user from group
+            alert(`${username} has been banned from the group.`);
+        }
+
+        function muteInGroup() {
+            const username = prompt('Enter username to mute:');
+            // Logic to mute user in group
+            alert(`${username} has been muted in the group.`);
         }
     </script>
 </body>
