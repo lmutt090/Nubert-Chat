@@ -18,6 +18,8 @@
         <div id="idDisplay"></div>
         <h2>Navigation</h2>
         <button onclick="goToDMPage()">Direct Messages</button>
+        <button onclick="goToProfilePage()">Profile</button>
+        <button onclick="goToProfileSettings()">Profile Settings</button>
         <!--<button onclick="goToGroupPage()">Group Messages</button> keep hidden until ready, it buggy.-->
         <!--<button onclick="goToMainPage()">Main Chat</button> this is the main chat already lmao.-->
         <h2>Online Users</h2>
@@ -144,6 +146,24 @@
         </div>
     </div>
 
+    <div id="profilePage" style="display:none;">
+        <h2>Profile</h2>
+        <div>
+            <label for="profileUsername">Username:</label>
+            <span id="profileUsername"></span>
+        </div>
+        <div>
+            <label for="profileBio">Bio:</label>
+            <textarea id="profileBio" placeholder="Tell us about yourself..."></textarea>
+        </div>
+        <div>
+            <label for="profileAvatar">Avatar URL:</label>
+            <input type="text" id="profileAvatar" placeholder="Enter avatar URL">
+        </div>
+        <button onclick="saveProfile()">Save Profile</button>
+        <button onclick="goToMainPage()">Back to Main</button>
+    </div>
+
     <script>
         let ws;
         let username = '';
@@ -190,9 +210,11 @@
             if (data.type === 'error') {
                 alert(data.message);
             } else if (data.type === 'login-success') {
+                // Display the new ID format in the idDisplay section
+                document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
+                document.cookie = `authToken=${data.id}; path=/; expires=${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toUTCString()}`;
                 document.getElementById('authSection').style.display = 'none';
                 document.getElementById('chatSection').style.display = 'block';
-                document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
                 isAdmin = data.isAdmin;
                 isOwner = data.isOwner;
                 toggleAdminTools();
@@ -214,6 +236,10 @@
                 updateDMUserList(data.users);
             } else if (data.type === 'dm-messages') {
                 handleDMMessages(data);
+            } else if (data.type === 'profile-data') {
+                handleProfileData(data);
+            } else if (data.type === 'success' && data.message === 'Profile updated successfully.') {
+                alert('Profile updated successfully!');
             }
         }
 
@@ -336,6 +362,36 @@
             document.getElementById('chatSection').style.display = 'block';
         }
 
+        function goToProfilePage() {
+            const profileUrl = `?profile=Nubert-${usernameToNumbers(username)}-nuberT`;
+            window.location.href = profileUrl;
+        }
+
+        function goToProfileSettings() {
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'none';
+            document.getElementById('dmPage').style.display = 'none';
+            document.getElementById('groupPage').style.display = 'none';
+            document.getElementById('profilePage').style.display = 'block';
+
+            // Fetch profile data from the server
+            ws.send(JSON.stringify({ type: 'get-profile' }));
+        }
+
+        function handleProfileData(data) {
+            document.getElementById('profileUsername').textContent = data.profile.username;
+            document.getElementById('profileBio').value = data.profile.bio;
+            document.getElementById('profileAvatar').value = data.profile.avatar_url;
+        }
+
+        function saveProfile() {
+            const bio = document.getElementById('profileBio').value;
+            const avatar_url = document.getElementById('profileAvatar').value;
+
+            // Send updated profile data to the server
+            ws.send(JSON.stringify({ type: 'update-profile', bio, avatar_url }));
+        }
+
         function sendDM() {
             const recipient = lastRecipient || prompt('Enter the username of the recipient:');
 
@@ -455,6 +511,39 @@
             // Logic to mute user in group
             alert(`${username} has been muted in the group.`);
         }
+
+        function autoLogin() {
+            const cookies = document.cookie.split('; ').reduce((acc, cookie) => {
+                const [key, value] = cookie.split('=');
+                acc[key] = value;
+                return acc;
+            }, {});
+
+            if (cookies.authToken) {
+                ws = new WebSocket(getWebSocketURL());
+
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({ type: 'auto-login', token: cookies.authToken }));
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'login-success') {
+                        // Fix auto-login to display the ID
+                        document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
+                        document.getElementById('authSection').style.display = 'none';
+                        document.getElementById('chatSection').style.display = 'block';
+                        isAdmin = data.isAdmin;
+                        isOwner = data.isOwner;
+                        toggleAdminTools();
+                    } else if (data.type === 'error') {
+                        alert(data.message);
+                    }
+                };
+            }
+        }
+
+        window.onload = autoLogin;
     </script>
 </body>
 </html>

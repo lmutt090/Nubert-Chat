@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Profiles</title>
+</head>
+<body>
+    <h1>Welcome to User Profiles</h1>
+    <p>To view a user's profile, use the URL format: <code>/users?profile=[user_id]</code>, where <code>[user_id]</code> is the unique 20-digit ID assigned to the user.</p>
+    <a href="/">Back to Home</a>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const profile = urlParams.get('profile');
+
+        if (profile) {
+            fetch(`/users?profile=${profile}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Profile not found');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const profileContainer = document.createElement('div');
+                    profileContainer.innerHTML = `
+                        <h2>Profile of ${data.username}</h2>
+                        <p><strong>Bio:</strong> ${data.bio}</p>
+                        <img src="${data.avatar_url}" alt="Avatar of ${data.username}" style="max-width: 200px;">
+                    `;
+                    document.body.appendChild(profileContainer);
+                })
+                .catch(error => {
+                    const errorMessage = document.createElement('p');
+                    errorMessage.textContent = error.message;
+                    document.body.appendChild(errorMessage);
+                });
+        } else {
+            const errorMessage = document.createElement('p');
+            errorMessage.textContent = 'No profile specified in the URL.';
+            document.body.appendChild(errorMessage);
+        }
+    });
+</script>
+</body>
+</html>
