@@ -63,6 +63,74 @@ function usernameToNumbers(username) {
     return username.split('').map(char => char.charCodeAt(0)).join('');
 }
 
+const groupsFolder = path.join(__dirname, 'groups');
+if (!fs.existsSync(groupsFolder)) fs.mkdirSync(groupsFolder);
+
+const groupDataPath = path.join(groupsFolder, 'groupdata.db'); // Updated to store groupdata.db in the groups folder
+const groupDataDb = new sqlite3.Database(groupDataPath, (err) => {
+    if (err) {
+        console.error('Could not connect to groupdata database', err);
+    } else {
+        console.log('Connected to groupdata database');
+        groupDataDb.run(`CREATE TABLE IF NOT EXISTS groups (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            description TEXT,
+            join_paused INTEGER DEFAULT 0
+        )`);
+    }
+});
+
+function getGroupDb(groupId) {
+    const groupDbPath = path.join(groupsFolder, `${groupId}.db`);
+    const groupDb = new sqlite3.Database(groupDbPath, (err) => {
+        if (err) {
+            console.error(`Could not connect to group database for group ${groupId}`, err);
+        } else {
+            groupDb.run(`CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender TEXT,
+                message TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
+            groupDb.run(`CREATE TABLE IF NOT EXISTS members (
+                username TEXT PRIMARY KEY,
+                is_moderator INTEGER DEFAULT 0
+            )`);
+        }
+    });
+    return groupDb;
+}
+
+// Add support for listing DM history
+function getDMHistory(username, callback) {
+    db.all(`SELECT DISTINCT sender, receiver FROM messages WHERE sender = ? OR receiver = ?`, [username, username], (err, rows) => {
+        if (err) {
+            console.error('Error fetching DM history:', err);
+            callback([]);
+        } else {
+            const users = new Set();
+            rows.forEach(row => {
+                if (row.sender !== username) users.add(row.sender);
+                if (row.receiver !== username) users.add(row.receiver);
+            });
+            callback(Array.from(users));
+        }
+    });
+}
+
+// Add support for listing group memberships
+function getUserGroups(username, callback) {
+    groupDataDb.all(`SELECT id, name FROM groups WHERE id IN (SELECT DISTINCT group_id FROM members WHERE username = ?)`, [username], (err, rows) => {
+        if (err) {
+            console.error('Error fetching user groups:', err);
+            callback([]);
+        } else {
+            callback(rows);
+        }
+    });
+}
+
 wss.on('connection', (ws) => {
     let user = null;
     let isAdmin = false;
@@ -72,7 +140,23 @@ wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         let data = JSON.parse(message);
 
-        if (data.type === 'register') {
+        if (data.type === 'get-dm-history') {
+            if (user) {
+                getDMHistory(user, (users) => {
+                    ws.send(JSON.stringify({ type: 'dm-history', users }));
+                });
+            }
+        }
+
+        else if (data.type === 'get-user-groups') {
+            if (user) {
+                getUserGroups(user, (groups) => {
+                    ws.send(JSON.stringify({ type: 'user-groups', groups }));
+                });
+            }
+        }
+
+        else if (data.type === 'register') {
             const { username, password } = data;
             bcrypt.hash(password, 10, (err, hash) => {
                 if (err) {
@@ -197,6 +281,88 @@ wss.on('connection', (ws) => {
                             ws.send(JSON.stringify({ type: 'admin-update', message: `${data.target} is no longer an admin.` }));
                         }
                     });
+                }
+            });
+        }
+
+        else if (data.type === 'create-group' && isOwner) {
+            const { groupId, name, description } = data;
+            groupDataDb.run(`INSERT INTO groups (id, name, description) VALUES (?, ?, ?)`, [groupId, name, description], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Group creation failed.' }));
+                } else {
+                    getGroupDb(groupId); // Initialize the group database
+                    ws.send(JSON.stringify({ type: 'group-created', groupId }));
+                }
+            });
+        }
+
+        else if (data.type === 'send-group-message') {
+            const { groupId, message } = data;
+            const groupDb = getGroupDb(groupId);
+            groupDb.run(`INSERT INTO messages (sender, message) VALUES (?, ?)`, [user, message]);
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'group-message', groupId, sender: user, message }));
+                }
+            });
+        }
+
+        else if (data.type === 'toggle-join-pause' && isOwner) {
+            const { groupId, pause } = data;
+            groupDataDb.run(`UPDATE groups SET join_paused = ? WHERE id = ?`, [pause ? 1 : 0, groupId], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to toggle join pause.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'join-pause-toggled', groupId, paused: pause }));
+                }
+            });
+        }
+
+        else if (data.type === 'add-moderator' && isOwner) {
+            const { groupId, target } = data;
+            const groupDb = getGroupDb(groupId);
+            groupDb.run(`UPDATE members SET is_moderator = 1 WHERE username = ?`, [target], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to add moderator.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'moderator-added', groupId, target }));
+                }
+            });
+        }
+
+        else if (data.type === 'kick-from-group' && isOwner) {
+            const { groupId, target } = data;
+            const groupDb = getGroupDb(groupId);
+            groupDb.run(`DELETE FROM members WHERE username = ?`, [target], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to kick user.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'user-kicked', groupId, target }));
+                }
+            });
+        }
+
+        else if (data.type === 'ban-from-group' && isOwner) {
+            const { groupId, target } = data;
+            const groupDb = getGroupDb(groupId);
+            groupDb.run(`INSERT OR REPLACE INTO members (username, is_moderator) VALUES (?, 0)`, [target], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to ban user.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'user-banned', groupId, target }));
+                }
+            });
+        }
+
+        else if (data.type === 'mute-in-group' && isOwner) {
+            const { groupId, target } = data;
+            const groupDb = getGroupDb(groupId);
+            groupDb.run(`INSERT OR REPLACE INTO members (username, is_moderator) VALUES (?, 0)`, [target], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to mute user.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'user-muted', groupId, target }));
                 }
             });
         }
