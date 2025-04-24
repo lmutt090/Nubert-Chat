@@ -15,7 +15,7 @@ const clients = new Map(); // username => ws
 const dbPath = path.join(__dirname, 'NubNub.db');
 const isFirstRun = !fs.existsSync(dbPath);
 let whitelistEnabled = true;
-let localTunnelEnabled = process.env.LOCALTUNNEL === 'false'; // Enable LocalTunnel if the environment variable is set
+let localTunnelEnabled = 'true'; // Enable LocalTunnel if the environment variable is set
 
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
@@ -39,10 +39,13 @@ const db = new sqlite3.Database(dbPath, (err) => {
             is_banned INTEGER DEFAULT 0,
             is_muted INTEGER DEFAULT 0,
             is_whitelisted INTEGER DEFAULT 0,
-            is_user_able_to_access_profile_settings INTEGER DEFAULT 0,
-            is_user_able_to_access_profiles INTEGER DEFAULT 0,
-            is_user_able_to_access_groups INTEGER DEFAULT 0,
-        )`, () => {
+            is_user_able_to_access_profiles INTEGER DEFAULT 0
+        )`, (err) => {
+            if (err) {
+                console.error('Error creating users table:', err);
+            } else {
+                console.log('Users table created or already exists.');
+            }
             if (isFirstRun) {
                 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
                 rl.question('Set owner username: ', username => {
@@ -448,7 +451,7 @@ if (localTunnelEnabled) {
     const localtunnel = require('localtunnel');
 
     (async () => {
-        const tunnel = await localtunnel({ port: 3000 });
+        const tunnel = await localtunnel({ port: 3000, subdomain: 'nubnub' });
 
         console.log(`Server is publicly accessible at ${tunnel.url}`);
 
