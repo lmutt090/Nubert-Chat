@@ -77,7 +77,7 @@ wss.on('connection', (ws) => {
                 } else {
                     db.run(`INSERT INTO users (username, password, is_whitelisted) VALUES (?, ?, 1)`, [username, hash], function(err) {
                         if (err) {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
+                            ws.send(JSON.stringify({ type: 'error', message: 'Username (possibly) already taken' }));
                         } else {
                             ws.send(JSON.stringify({ type: 'register-success', username }));
                         }
