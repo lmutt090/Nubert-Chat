@@ -267,6 +267,9 @@
             document.getElementById('chatSection').style.display = 'none';
             document.getElementById('groupPage').style.display = 'none'; // Ensure group page is hidden
             document.getElementById('dmPage').style.display = 'block';
+
+            // Request DM history from the server
+            ws.send(JSON.stringify({ type: 'get-dm-history' }));
         }
 
         function goToGroupPage() {
