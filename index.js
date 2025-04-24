@@ -33,6 +33,9 @@ const db = new sqlite3.Database(dbPath, (err) => {
         db.run(`CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,
+            bio TEXT DEFAULT '',
+            avatar_url TEXT DEFAULT '',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             password TEXT,
             is_admin INTEGER DEFAULT 0,
             is_owner INTEGER DEFAULT 0,
@@ -46,14 +49,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
             } else {
                 console.log('Users table created or already exists.');
             }
+            // Update the user creation logic to generate a random 20-digit ID
             if (isFirstRun) {
                 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
                 rl.question('Set owner username: ', username => {
                     rl.question('Set owner password: ', password => {
+                        const randomId = Math.floor(10 ** 19 + Math.random() * 9 * 10 ** 19); // Generate a random 20-digit number
                         bcrypt.hash(password, 10, (err, hash) => {
                             if (!err) {
-                                db.run(`INSERT INTO users (username, password, is_admin, is_owner, is_whitelisted) VALUES (?, ?, 1, 1, 1)`, [username, hash], () => {
-                                    console.log('Owner account created.');
+                                db.run(`INSERT INTO users (id, username, password, is_admin, is_owner, is_whitelisted) VALUES (?, ?, ?, 1, 1, 1)`, [randomId, username, hash], () => {
+                                    console.log('Owner account created with ID:', randomId);
                                     rl.close();
                                 });
                             }
@@ -203,6 +208,29 @@ wss.on('connection', (ws) => {
                             ws.send(JSON.stringify({ type: 'error', message: 'Invalid password' }));
                         }
                     });
+                }
+            });
+        }
+
+        else if (data.type === 'auto-login') {
+            const token = data.token;
+            const username = token.split('-')[1]; // Extract username from token
+
+            db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, row) => {
+                if (err || !row) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Invalid token or user not found.' }));
+                } else if (row.is_banned) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'You are banned.' }));
+                } else if (whitelistEnabled && row.is_whitelisted !== 1) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'You are not whitelisted.' }));
+                } else {
+                    user = username;
+                    isAdmin = row.is_admin === 1;
+                    isOwner = row.is_owner === 1;
+                    isMuted = row.is_muted === 1;
+                    clients.set(user, ws);
+                    ws.send(JSON.stringify({ type: 'login-success', id: token, isAdmin, isOwner }));
+                    broadcastUserList();
                 }
             });
         }
@@ -421,7 +449,27 @@ wss.on('connection', (ws) => {
                 });
             }
         }
-    });
+
+        // Handle profile-related WebSocket messages
+        if (data.type === 'get-profile') {
+            db.get(`SELECT username, bio, avatar_url FROM users WHERE username = ?`, [user], (err, row) => {
+                if (err || !row) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch profile.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'profile-data', profile: row }));
+                }
+            });
+        } else if (data.type === 'update-profile') {
+            const { bio, avatar_url } = data;
+            db.run(`UPDATE users SET bio = ?, avatar_url = ? WHERE username = ?`, [bio, avatar_url, user], (err) => {
+                if (err) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'success', message: 'Profile updated successfully.' }));
+                }
+            });
+        }
+    }); // Fixed closing braces and parentheses
 
     ws.on('close', () => {
         clients.delete(user);
@@ -439,11 +487,34 @@ function broadcastUserList() {
     });
 }
 
-// Serve static files from the current directory
-app.use(express.static(__dirname));
-
 // Use the Express app to handle HTTP requests
 server.on('request', app);
+
+// Update the endpoint to fetch profile by ID instead of decoding username
+app.get('/users', (req, res) => {
+    const profileId = req.query.profile;
+
+    if (!profileId) {
+        return res.status(400).json({ error: 'Profile parameter is required' });
+    }
+
+    db.get(`SELECT username, bio, avatar_url FROM users WHERE id = ?`, [profileId], (err, row) => {
+        if (err) {
+            console.error('Error fetching profile:', err);
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+
+        if (!row) {
+            console.log(`No profile found for ID: ${profileId}`); // Debug log
+            return res.status(404).json({ error: 'Profile not found' });
+        }
+
+        res.json(row);
+    });
+});
+
+// Serve static files from the current directory
+app.use(express.static(__dirname));
 
 server.listen(3000, () => console.log('Server running on port 3000'));
 
@@ -518,29 +589,22 @@ function handleCommand(command, user, ws) {
                     ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have unblocked ${unblockTarget}.` }));
                 }
             });
-            case 'profile-access':
-                const setting = args[1];
-                const toggle = args[2] === 'on' ? 1 : 0;
-
-                if (!targetUser || !setting || (toggle !== 1 && toggle !== 0)) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Usage: /profile-access <user> <setting> <on|off>' }));
-                    return;
+            break;
+        case 'profile-access':
+            db.get(`SELECT is_user_able_to_access_profiles FROM users WHERE username = ?`, [user], (err, row) => {
+                if (err || !row) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch profile access status.' }));
+                } else {
+                    const newValue = row.is_user_able_to_access_profiles === 1 ? 0 : 1;
+                    db.run(`UPDATE users SET is_user_able_to_access_profiles = ? WHERE username = ?`, [newValue, user], (err) => {
+                        if (err) {
+                            ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile access.' }));
+                        } else {
+                            ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `Your profile access is now set to ${newValue ? 'on' : 'off'}.` }));
+                        }
+                    });
                 }
-
-                const column = setting === 'view' ? 'is_user_able_to_access_profiles' : setting === 'edit' ? 'is_user_able_to_access_profile_settings' : null;
-
-                if (!column) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Invalid setting. Use "view" or "edit".' }));
-                    return;
-                }
-
-                db.run(`UPDATE users SET ${column} = ? WHERE username = ?`, [toggle, targetUser], (err) => {
-                    if (err) {
-                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile access.' }));
-                    } else {
-                        ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `Profile access for ${targetUser} (${setting}) set to ${toggle ? 'on' : 'off'}.` }));
-                    }
-                });
+            });
             break;
         default:
             ws.send(JSON.stringify({ type: 'error', message: 'Unknown command. Type /help for a list of commands.' }));
