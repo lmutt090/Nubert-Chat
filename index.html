@@ -21,6 +21,17 @@
             <option value="">Public Chat</option>
         </select>
 
+        <h3>Admin Tools (Only available for admins and owners)</h3>
+        <div id="adminTools" style="display:none;">
+            <button onclick="banUser()">Ban User</button>
+            <button onclick="unbanUser()">Unban User</button>
+            <button onclick="muteUser()">Mute User</button>
+            <button onclick="unmuteUser()">Unmute User</button>
+            <button onclick="kickUser()">Kick User</button>
+            <button onclick="whitelistUser()">Whitelist User</button>
+            <button onclick="unwhitelistUser()">Unwhitelist User</button>
+        </div>
+
         <div id="chatBox" style="border:1px solid #ccc; padding:10px; margin-top:10px; height:200px; overflow:auto;"></div>
         <input type="text" id="messageInput" placeholder="Enter message">
         <button onclick="sendMessage()">Send</button>
@@ -29,6 +40,8 @@
     <script>
         let ws;
         let username = '';
+        let isAdmin = false;
+        let isOwner = false;
 
         function register() {
             username = document.getElementById('username').value;
@@ -63,6 +76,9 @@
                 document.getElementById('authSection').style.display = 'none';
                 document.getElementById('chatSection').style.display = 'block';
                 document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
+                isAdmin = data.isAdmin;
+                isOwner = data.isOwner;
+                toggleAdminTools();
             } else if (data.type === 'register-success') {
                 alert('Registration successful. Please log in.');
             } else if (data.type === 'chat') {
@@ -71,6 +87,14 @@
                 appendMessage(`(DM from ${data.from}): ${data.message}`);
             } else if (data.type === 'userlist') {
                 updateUserList(data.users);
+            } else if (data.type === 'admin-update') {
+                alert(data.message);
+            }
+        }
+
+        function toggleAdminTools() {
+            if (isAdmin || isOwner) {
+                document.getElementById('adminTools').style.display = 'block';
             }
         }
 
@@ -102,6 +126,55 @@
                     select.innerHTML += `<option value="${user}">${user}</option>`;
                 }
             });
+        }
+
+        function banUser() {
+            const target = prompt("Enter username to ban:");
+            if (target) {
+                ws.send(JSON.stringify({ type: 'ban', target }));
+            }
+        }
+
+        function unbanUser() {
+            const target = prompt("Enter username to unban:");
+            if (target) {
+                ws.send(JSON.stringify({ type: 'unban', target }));
+            }
+        }
+
+        function muteUser() {
+            const target = prompt("Enter username to mute:");
+            if (target) {
+                ws.send(JSON.stringify({ type: 'mute', target }));
+            }
+        }
+
+        function unmuteUser() {
+            const target = prompt("Enter username to unmute:");
+            if (target) {
+                ws.send(JSON.stringify({ type: 'unmute', target }));
+            }
+        }
+
+        function kickUser() {
+            const target = prompt("Enter username to kick:");
+            if (target) {
+                ws.send(JSON.stringify({ type: 'kick', target }));
+            }
+        }
+
+        function whitelistUser() {
+            const target = prompt("Enter username to whitelist:");
+            if (target) {
+                ws.send(JSON.stringify({ type: 'whitelist', target }));
+            }
+        }
+
+        function unwhitelistUser() {
+            const target = prompt("Enter username to unwhitelist:");
+            if (target) {
+                ws.send(JSON.stringify({ type: 'unwhitelist', target }));
+            }
         }
     </script>
 </body>
