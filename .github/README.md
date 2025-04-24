@@ -5,7 +5,7 @@ Welcome to **Nubert Chat**, a repository for building dynamic and interactive ch
 ## Table of Contents
 
 - [About the Project](#about-the-project)
-- [Getting Started](#getting-started)
+- [Quickly Get Started](#quickly-get-started)
 - [Installation](#installation)
 - [Contributing](#contributing)
 - [License](#license)
@@ -16,7 +16,7 @@ Welcome to **Nubert Chat**, a repository for building dynamic and interactive ch
 
 Nubert Chat is designed to deliver an engaging chat experience. While the repository is still under development, the focus is on creating a lightweight, efficient, and user-friendly chat environment.
 
-## Getting Started
+## Quickly Get Started
 
 To get started with **Nubert Chat**, follow these steps:
 
@@ -24,14 +24,11 @@ To get started with **Nubert Chat**, follow these steps:
    ```bash
    git clone https://github.com/lmutt090/Nubert-Chat.git
    ```
-2. Install dependencies:
+2. run the batch file:
    ```bash
-   npm install
+   .\firstrun.bat
    ```
-3. Start the project:
-   ```bash
-   node index.js
-   ```
+2. or open the batch file in your [file manager]().
 
 ## Installation
 
@@ -41,7 +38,9 @@ Ensure you have the following installed:
 - **Node.js** (version 14 or higher recommended)
 - A code editor (e.g., VS Code)
 
-### Steps
+### Normal Steps
+
+_Refer to [Quickly Get Started](#quickly-get-started) if you dont want to do this, but be quick._
 
 1. Clone the repository:
    ```bash
