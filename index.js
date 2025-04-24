@@ -39,7 +39,9 @@ const db = new sqlite3.Database(dbPath, (err) => {
             is_banned INTEGER DEFAULT 0,
             is_muted INTEGER DEFAULT 0,
             is_whitelisted INTEGER DEFAULT 0,
-            is_user_able_to_be_blocked INTEGER DEFAULT 1
+            is_user_able_to_access_profile_settings INTEGER DEFAULT 0,
+            is_user_able_to_access_profiles INTEGER DEFAULT 0,
+            is_user_able_to_access_groups INTEGER DEFAULT 0,
         )`, () => {
             if (isFirstRun) {
                 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -513,6 +515,29 @@ function handleCommand(command, user, ws) {
                     ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have unblocked ${unblockTarget}.` }));
                 }
             });
+            case 'profile-access':
+                const setting = args[1];
+                const toggle = args[2] === 'on' ? 1 : 0;
+
+                if (!targetUser || !setting || (toggle !== 1 && toggle !== 0)) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Usage: /profile-access <user> <setting> <on|off>' }));
+                    return;
+                }
+
+                const column = setting === 'view' ? 'is_user_able_to_access_profiles' : setting === 'edit' ? 'is_user_able_to_access_profile_settings' : null;
+
+                if (!column) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Invalid setting. Use "view" or "edit".' }));
+                    return;
+                }
+
+                db.run(`UPDATE users SET ${column} = ? WHERE username = ?`, [toggle, targetUser], (err) => {
+                    if (err) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile access.' }));
+                    } else {
+                        ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `Profile access for ${targetUser} (${setting}) set to ${toggle ? 'on' : 'off'}.` }));
+                    }
+                });
             break;
         default:
             ws.send(JSON.stringify({ type: 'error', message: 'Unknown command. Type /help for a list of commands.' }));
