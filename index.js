@@ -118,28 +118,34 @@ const groupDataDb = new sqlite3.Database(groupDataPath, (err) => {
             is_moderator INTEGER DEFAULT 0,
             PRIMARY KEY (username, group_id)
         )`);
+        // No separate group DBs, messages stored in tables per group below
     }
 });
 
-function getGroupDb(groupId) {
-    const groupDbPath = path.join(groupsFolder, `${groupId}.db`);
-    const groupDb = new sqlite3.Database(groupDbPath, (err) => {
+// Remove getGroupDb function as no separate DBs per group
+
+// Helper function to get messages table name for a group
+function getGroupMessagesTableName(groupId) {
+    // Sanitize groupId to be safe as table name
+    return `messages_${groupId.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+}
+
+// Create messages table for a group if not exists
+function ensureGroupMessagesTable(groupId) {
+    const tableName = getGroupMessagesTableName(groupId);
+    const createTableSQL = `
+        CREATE TABLE IF NOT EXISTS ${tableName} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender TEXT,
+            message TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `;
+    groupDataDb.run(createTableSQL, (err) => {
         if (err) {
-            console.error(`Could not connect to group database for group ${groupId}`, err);
-        } else {
-            groupDb.run(`CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sender TEXT,
-                message TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )`);
-            groupDb.run(`CREATE TABLE IF NOT EXISTS members (
-                username TEXT PRIMARY KEY,
-                is_moderator INTEGER DEFAULT 0
-            )`);
+            console.error(`Error creating messages table for group ${groupId}:`, err);
         }
     });
-    return groupDb;
 }
 
 // Add support for listing DM history
@@ -249,9 +255,10 @@ wss.on('connection', (ws) => {
                     ws.send(JSON.stringify({ type: 'error', message: 'Access denied or not a member of the group' }));
                     return;
                 }
-                // Open group DB and fetch messages
-                const groupDb = getGroupDb(groupId);
-                groupDb.all(`SELECT sender, message, timestamp FROM messages ORDER BY timestamp ASC LIMIT 100`, [], (err, rows) => {
+                // Ensure messages table exists for group
+                ensureGroupMessagesTable(groupId);
+                const tableName = getGroupMessagesTableName(groupId);
+                groupDataDb.all(`SELECT sender, message, timestamp FROM ${tableName} ORDER BY timestamp ASC LIMIT 100`, [], (err, rows) => {
                     if (err) {
                         ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch group messages' }));
                         return;
@@ -278,9 +285,10 @@ wss.on('connection', (ws) => {
                     ws.send(JSON.stringify({ type: 'error', message: 'Access denied or not a member of the group' }));
                     return;
                 }
-                // Insert message into group DB
-                const groupDb = getGroupDb(groupId);
-                groupDb.run(`INSERT INTO messages (sender, message) VALUES (?, ?)`, [user, messageText], function(err) {
+                // Ensure messages table exists for group
+                ensureGroupMessagesTable(groupId);
+                const tableName = getGroupMessagesTableName(groupId);
+                groupDataDb.run(`INSERT INTO ${tableName} (sender, message) VALUES (?, ?)`, [user, messageText], function(err) {
                     if (err) {
                         ws.send(JSON.stringify({ type: 'error', message: 'Failed to send group message' }));
                         return;

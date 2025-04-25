@@ -67,22 +67,15 @@
         <button onclick="goToDMPage()">Direct Messages</button>
         <button onclick="goToProfilePage()">Profile</button>
         <button onclick="goToProfileSettings()">Profile Settings</button>
-            <button onclick="goToGroupPage()">Group Messages</button>
+        <button onclick="goToGroupPage()">Group Messages</button>
         <!--<button onclick="goToMainPage()">Main Chat</button> this is the main chat already lmao.-->
+
         <h2>Online Users</h2>
         <ul id="dmTarget" style="list-style-type: none; padding: 0; max-height: 150px; overflow-y: auto;">
-            <!-- Online users or groups will be dynamically added here -->
+            <!-- Online users will be dynamically added here -->
         </ul>
-        <div id="groupOptions" style="display: none;">
-            <h3>Your Groups</h3>
-            <ul id="groupList" style="list-style-type: none; padding: 0; max-height: 100px; overflow-y: auto;">
-                <!-- Group chats will be dynamically added here -->
-            </ul>
-            <button onclick="createGroupChat()">Create Group Chat</button>
-        </div>
-
-        <h3 id="adminTools" style="display:none;">Admin Tools (Only available for admins and owners)</h3>
         <div id="adminTools" style="display:none;">
+            <h3>Admin Tools</h3>
             <button onclick="banUser()">Ban User</button>
             <button onclick="unbanUser()">Unban User</button>
             <button onclick="muteUser()">Mute User</button>
@@ -95,6 +88,15 @@
         <div id="chatBox" style="border:1px solid #ccc; padding:10px; margin-top:10px; height:200px; overflow:auto;"></div>
         <input type="text" id="messageInput" placeholder="Enter message">
         <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <div id="groupOptions" style="display: none;">
+        <button onclick="goToMainPage()">Go to Main Page</button>
+        <h3>Your Groups</h3>
+        <ul id="groupList" style="list-style-type: none; padding: 0; max-height: 100px; overflow-y: auto;">
+            <!-- Group chats will be dynamically added here -->
+        </ul>
+        <button onclick="createGroupChat()">Create Group Chat</button>
     </div>
 
     <div id="dmPage" style="display:none;">
@@ -178,19 +180,18 @@
 
     <div id="groupPage" style="display:none;">
         <h2>Group Messages</h2>
-        <div id="groupHistory" style="border:1px solid #ccc; padding:10px; height:200px; overflow:auto;"></div>
-        <input type="text" id="groupMessageInput" placeholder="Enter message">
-        <button onclick="sendGroupMessage()">Send Message</button>
-        <button onclick="generateInviteLink()">Generate Invite Link</button>
-        <button onclick="goToMainPage()">Back to Main</button>
-
-        <h3 id="groupManagement" style="display:none;">Group Management (Owner Only)</h3>
         <div id="groupManagement" style="display:none;">
+            <h3>Group Management</h3>
             <button onclick="addModerator()">Add Moderator</button>
             <button onclick="kickFromGroup()">Kick User</button>
             <button onclick="banFromGroup()">Ban User</button>
             <button onclick="muteInGroup()">Mute User</button>
+            <button onclick="ShowInviteLink()">Show Invite Link</button>
         </div>
+        <div id="groupHistory" style="border:1px solid #ccc; padding:10px; height:200px; overflow:auto;"></div>
+        <input type="text" id="groupMessageInput" placeholder="Enter message">
+        <button onclick="sendGroupMessage()">Send Message</button>
+        <button onclick="updateGroupList()">Back to groups</button>
     </div>
 
     <div id="profilePage" style="display:none;">
@@ -371,30 +372,34 @@
                 li.textContent = group.name;
                 li.style.cursor = 'pointer';
                 li.onclick = () => {
-                    // Instead of opening group chat directly, set currentGroupId and go to chatSection
+                    // Instead of opening group chat directly, set currentGroupId and go to groupPage as chatroom
                     currentGroupId = group.id;
                     document.getElementById('groupOptions').style.display = 'none';
-                    document.getElementById('chatSection').style.display = 'block';
+                    document.getElementById('chatSection').style.display = 'none';
                     document.getElementById('dmPage').style.display = 'none';
-                    document.getElementById('groupPage').style.display = 'none';
+                    document.getElementById('groupPage').style.display = 'block';
 
-                    // Clear and prepare chat box for group messages
-                    document.getElementById('chatBox').innerHTML = '';
-                    document.getElementById('messageInput').value = '';
+                    // Clear and prepare group chat history and input
+                    document.getElementById('groupHistory').innerHTML = '';
+                    document.getElementById('groupMessageInput').value = '';
 
                     // Request group messages from server
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: 'get-group-messages', groupId: currentGroupId }));
                     }
 
-                    // Update chat header or display group name if needed
-                    document.getElementById('idDisplay').innerText = `Group Chat: ${group.name}`;
+                    // Update group page header with group name
+                    document.querySelector('#groupPage h2').textContent = `Group Messages - ${group.name}`;
                 };
                 groupList.appendChild(li);
             });
 
-            // Show groupOptions section if user has groups
-            document.getElementById('groupOptions').style.display = groups.length > 0 ? 'block' : 'none';
+            document.getElementById('groupOptions').style.display = 'block';
+            // Hide original menu (dmTarget user list) and chatSection
+            document.getElementById('dmTarget').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'none';
+            document.getElementById('groupPage').style.display = 'none';
+        
         }
 
         // Send group message
@@ -404,7 +409,7 @@
 
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'send-group-message', groupId: currentGroupId, message }));
-                appendGroupHistory(`You: ${message}`);
+                // appendGroupHistory(`You: ${message}`); // Remove local append to avoid duplication, server will send message back
                 document.getElementById('groupMessageInput').value = '';
             }
         }
@@ -512,9 +517,21 @@
 
         function goToGroupPage() {
             document.getElementById('authSection').style.display = 'none';
-            document.getElementById('chatSection').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'none'; // Hide chatSection
             document.getElementById('dmPage').style.display = 'none'; // Ensure DM page is hidden
-            document.getElementById('groupPage').style.display = 'block';
+            document.getElementById('groupPage').style.display = 'none'; // Hide groupPage
+
+            // Show groupOptions to display list of groups
+            document.getElementById('groupOptions').style.display = 'block';
+
+            // Clear group list (optional)
+            const groupList = document.getElementById('groupList');
+            groupList.innerHTML = '';
+
+            // Request user groups to populate groupOptions
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get-user-groups' }));
+            }
         }
 
         function goToMainPage() {
@@ -645,9 +662,9 @@
             groupHistory.scrollTop = groupHistory.scrollHeight;
         }
 
-        function generateInviteLink() {
-            // Logic to generate invite link for the group
-            alert('Invite link generated: [link]');
+        function ShowInviteLink() {
+            invitelsiasdn = "nothing right now lmaooooo"
+            alert(`Invite link generated: ${invitelsiasdn}`);
         }
 
         function addModerator() {
