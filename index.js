@@ -8,6 +8,7 @@ const readline = require('readline');
 const express = require('express');
 const app = express();
 const fetch = require('node-fetch'); // Make sure to install node-fetch if not already
+const crypto = require('crypto'); // Add this at the top of the file
 
 const webhookURL = 'https://your.webhook.url/here'; // Replace with your webhook URL
 
@@ -33,43 +34,60 @@ const db = new sqlite3.Database(dbPath, (err) => {
             message TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )`);
-        db.run(`CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            bio TEXT DEFAULT '',
-            avatar_url TEXT DEFAULT '',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            password TEXT,
-            is_admin INTEGER DEFAULT 0,
-            is_owner INTEGER DEFAULT 0,
-            is_banned INTEGER DEFAULT 0,
-            is_muted INTEGER DEFAULT 0,
-            is_whitelisted INTEGER DEFAULT 0,
-            is_user_able_to_access_profiles INTEGER DEFAULT 0
-        )`, (err) => {
-            if (err) {
-                console.error('Error creating users table:', err);
-            } else {
-                console.log('Users table created or already exists.');
-            }
-            // Update the user creation logic to generate a random 20-digit ID
-            if (isFirstRun) {
-                const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-                rl.question('Set owner username: ', username => {
-                    rl.question('Set owner password: ', password => {
-                        const randomId = Math.floor(10 ** 19 + Math.random() * 9 * 10 ** 19); // Generate a random 20-digit number
-                        bcrypt.hash(password, 10, (err, hash) => {
-                            if (!err) {
-                                db.run(`INSERT INTO users (id, username, password, is_admin, is_owner, is_whitelisted) VALUES (?, ?, ?, 1, 1, 1)`, [randomId, username, hash], () => {
-                                    console.log('Owner account created with ID:', randomId);
+        // Update the users table to remove AUTOINCREMENT from the id column
+        const updateUsersTableQuery = `
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                bio TEXT DEFAULT '',
+                avatar_url TEXT DEFAULT 'images/stock/OIP (3).jpeg',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                password TEXT,
+                is_admin INTEGER DEFAULT 0,
+                is_owner INTEGER DEFAULT 0,
+                is_banned INTEGER DEFAULT 0,
+                is_muted INTEGER DEFAULT 0,
+                is_whitelisted INTEGER DEFAULT 0,
+                is_user_bannable INTEGER DEFAULT 1
+            )
+        `;
+
+        db.serialize(() => {
+            db.exec(updateUsersTableQuery, (err) => {
+                if (err) {
+                    console.error('Error updating users table schema:', err);
+                } else {
+                    console.log('Users table schema updated successfully.');
+                }
+            });
+        });
+
+        if (isFirstRun) {
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+            rl.question('Set owner username: ', username => {
+                rl.question('Set owner password: ', password => {
+                    // Replace the random ID generation logic with hashing
+                    bcrypt.hash(password, 10, (err, hash) => {
+                        if (!err) {
+                            db.run(`INSERT INTO users (username, password, is_admin, is_owner, is_whitelisted) VALUES (?, ?, 1, 1, 1)`, [username, hash], () => {
+                                console.log('Owner account created with username:', username);
+                                db.get(`SELECT id FROM users WHERE username = ?`, [username], (err, row) => {
+                                    if (err) {
+                                        console.error('Error fetching owner ID:', err);
+                                        rl.close();
+                                        return;
+                                    }
+                                    const Id = row.id; // Use the fetched ID
+                                    console.log('Owner account created with ID:', Id);
                                     rl.close();
-                                });
-                            }
-                        });
+                                },);
+                                rl.close();
+                            });
+                        }
                     });
                 });
-            }
-        });
+            });
+        }
     }
 });
 
@@ -172,18 +190,36 @@ wss.on('connection', (ws) => {
 
         else if (data.type === 'register') {
             const { username, password } = data;
+
+            if (!username || !password) {
+                return ws.send(JSON.stringify({ type: 'error', message: 'Username and password are required' }));
+            }
+
+            // Replace the random ID generation logic with hashing
+
             bcrypt.hash(password, 10, (err, hash) => {
                 if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Error hashing password' }));
-                } else {
-                    db.run(`INSERT INTO users (username, password, is_whitelisted) VALUES (?, ?, 1)`, [username, hash], function(err) {
-                        if (err) {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Username (possibly) already taken' }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'register-success', username }));
-                        }
-                    });
+                    console.error('Error hashing password:', err);
+                    return ws.send(JSON.stringify({ type: 'error', message: 'Internal server error' }));
                 }
+
+                db.run(`INSERT INTO users (id, username, password, is_whitelisted) VALUES (?, ?, ?, 1)`, [randomId, username, hash], function(err) {
+                    if (err) {
+                        console.error('Error inserting user:', err);
+                        return ws.send(JSON.stringify({ type: 'error', message: 'Username may already be taken' }));
+                    }
+                    db.get(`SELECT id FROM users WHERE username = ?`, [username], (err, row) => {
+                        if (err) {
+                            console.error('Error fetching user ID:', err);
+                            rl.close();
+                            return;
+                        }
+                        const Id = row.id; // Use the fetched ID
+                        console.log('User account created with ID:', Id);
+                        rl.close();
+                    },);
+                    ws.send(JSON.stringify({ message: 'User registered successfully', id: Id })); // Send response to WebSocket client
+                });
             });
         }
 
@@ -525,26 +561,76 @@ function broadcastUserList() {
 // Use the Express app to handle HTTP requests
 server.on('request', app);
 
-// Update the endpoint to fetch profile by ID instead of decoding username
+// Update the endpoint to fetch profile by ID and serve an HTML page
 app.get('/users', (req, res) => {
     const profileId = req.query.profile;
 
     if (!profileId) {
-        return res.status(400).json({ error: 'Profile parameter is required' });
+        return res.status(400).send('<h1>Error: Profile ID is required</h1>');
     }
 
     db.get(`SELECT username, bio, avatar_url FROM users WHERE id = ?`, [profileId], (err, row) => {
         if (err) {
             console.error('Error fetching profile:', err);
-            return res.status(500).json({ error: 'Internal server error' });
+            return res.status(500).send('<h1>Internal Server Error</h1>');
         }
 
         if (!row) {
-            console.log(`No profile found for ID: ${profileId}`); // Debug log
-            return res.status(404).json({ error: 'Profile not found' });
+            console.log(`No profile found for ID: ${profileId}`);
+            return res.status(404).send('<h1>Profile Not Found</h1>');
         }
 
-        res.json(row);
+        // Render the profile page directly
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>${row.username}'s Profile</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        margin: 0;
+                        padding: 0;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        background-color: #f4f4f4;
+                    }
+                    .profile-container {
+                        background: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                        text-align: center;
+                        width: 300px;
+                    }
+                    .profile-container img {
+                        border-radius: 50%;
+                        width: 100px;
+                        height: 100px;
+                        object-fit: cover;
+                    }
+                    .profile-container h1 {
+                        font-size: 24px;
+                        margin: 10px 0;
+                    }
+                    .profile-container p {
+                        color: #666;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="profile-container">
+                    <img src="${row.avatar_url || 'default-avatar.png'}" alt="User Avatar">
+                    <h1>${row.username}</h1>
+                    <p>${row.bio || 'No bio available.'}</p>
+                </div>
+            </body>
+            </html>
+        `);
     });
 });
 

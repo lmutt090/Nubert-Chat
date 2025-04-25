@@ -3,6 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <title>Nubert Chat</title>
+    <style>
+        /* Add styles for the popup */
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .popup-content {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            padding: 20px;
+            width: 80%;
+            max-width: 500px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .popup-content iframe {
+            width: 100%;
+            height: 400px;
+            border: none;
+        }
+
+        .popup-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #ff5e57;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
     <h1>Nubert Chat</h1>
@@ -164,12 +211,21 @@
         <button onclick="goToMainPage()">Back to Main</button>
     </div>
 
+    <div class="popup-overlay" id="profilePopup">
+        <div class="popup-content">
+            <button class="popup-close" onclick="closePopup()">&times;</button>
+            <iframe id="profileFrame" src=""></iframe>
+        </div>
+    </div>
+
     <script>
         let ws;
         let username = '';
         let isAdmin = false;
         let isOwner = false;
         let lastRecipient = '';
+        let id ='';
+        let isGOwner = false;
 
         function getWebSocketURL() {
             const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -201,7 +257,7 @@
                 ws.send(JSON.stringify({ type: 'login', username, password }));
             };
 
-            ws.onmessage = handleMessage;
+            ws.onmessage = handleMessage; // Delegate message handling to handleMessage
         }
 
         function handleMessage(event) {
@@ -211,7 +267,8 @@
                 alert(data.message);
             } else if (data.type === 'login-success') {
                 // Display the new ID format in the idDisplay section
-                document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
+                id = data.id; // Store the ID for later use
+                document.getElementById('idDisplay').innerText = `Your ID: ${id}`;
                 document.getElementById('authSection').style.display = 'none';
                 document.getElementById('chatSection').style.display = 'block';
                 isAdmin = data.isAdmin;
@@ -353,8 +410,8 @@
         }
 
         function goToProfilePage() {
-            const profileUrl = `?profile=Nubert-${usernameToNumbers(username)}-nuberT`;
-            window.location.href = profileUrl;
+            const profileUrl = `/users?profile=${id}`; // Construct the profile URL dynamically
+            openPopup(profileUrl); // Open the profile in the popup
         }
 
         function goToProfileSettings() {
@@ -531,6 +588,20 @@
                     }
                 };
             }
+        }
+
+        function openPopup(profileUrl) {
+            const popup = document.getElementById('profilePopup');
+            const iframe = document.getElementById('profileFrame');
+            iframe.src = profileUrl;
+            popup.style.display = 'flex';
+        }
+
+        function closePopup() {
+            const popup = document.getElementById('profilePopup');
+            const iframe = document.getElementById('profileFrame');
+            iframe.src = '';
+            popup.style.display = 'none';
         }
 
         window.onload = autoLogin;

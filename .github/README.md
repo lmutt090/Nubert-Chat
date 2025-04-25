@@ -80,3 +80,9 @@ If you find this project helpful or use it in your work, a mention or a star on 
 ## Contact
 
 Created by [lmutt090](https://github.com/lmutt090). Reach out if you have any questions or suggestions!
+
+## Disclaimer
+
+The developers of **Nubert Chat** are not responsible for any data leaks that may occur. This is because the application is still in development and may also break due to contributor negligence. For enhanced security, it is strongly recommended to use this application within a secure domain and avoid port forwarding. Exposing the application to the public internet through port forwarding significantly increases the risk of data leaks.
+
+By default, the application uses LocalTunnel to expose the port. To disable this feature, change the value of `localTunnelEnabled` from `'true'` to `'false'` on line 22 of `index.js`.
