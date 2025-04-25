@@ -3,6 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <title>Nubert Chat</title>
+    <style>
+        /* Add styles for the popup */
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .popup-content {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            padding: 20px;
+            width: 80%;
+            max-width: 500px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .popup-content iframe {
+            width: 100%;
+            height: 400px;
+            border: none;
+        }
+
+        .popup-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #ff5e57;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
     <h1>Nubert Chat</h1>
@@ -20,22 +67,15 @@
         <button onclick="goToDMPage()">Direct Messages</button>
         <button onclick="goToProfilePage()">Profile</button>
         <button onclick="goToProfileSettings()">Profile Settings</button>
-        <!--<button onclick="goToGroupPage()">Group Messages</button> keep hidden until ready, it buggy.-->
+        <button onclick="goToGroupPage()">Group Messages</button>
         <!--<button onclick="goToMainPage()">Main Chat</button> this is the main chat already lmao.-->
+
         <h2>Online Users</h2>
         <ul id="dmTarget" style="list-style-type: none; padding: 0; max-height: 150px; overflow-y: auto;">
-            <!-- Online users or groups will be dynamically added here -->
+            <!-- Online users will be dynamically added here -->
         </ul>
-        <div id="groupOptions" style="display: none;">
-            <h3>Your Groups</h3>
-            <ul id="groupList" style="list-style-type: none; padding: 0; max-height: 100px; overflow-y: auto;">
-                <!-- Group chats will be dynamically added here -->
-            </ul>
-            <button onclick="createGroupChat()">Create Group Chat</button>
-        </div>
-
-        <h3 id="adminTools" style="display:none;">Admin Tools (Only available for admins and owners)</h3>
         <div id="adminTools" style="display:none;">
+            <h3>Admin Tools</h3>
             <button onclick="banUser()">Ban User</button>
             <button onclick="unbanUser()">Unban User</button>
             <button onclick="muteUser()">Mute User</button>
@@ -48,6 +88,15 @@
         <div id="chatBox" style="border:1px solid #ccc; padding:10px; margin-top:10px; height:200px; overflow:auto;"></div>
         <input type="text" id="messageInput" placeholder="Enter message">
         <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <div id="groupOptions" style="display: none;">
+        <button onclick="goToMainPage()">Go to Main Page</button>
+        <h3>Your Groups</h3>
+        <ul id="groupList" style="list-style-type: none; padding: 0; max-height: 100px; overflow-y: auto;">
+            <!-- Group chats will be dynamically added here -->
+        </ul>
+        <button onclick="createGroupChat()">Create Group Chat</button>
     </div>
 
     <div id="dmPage" style="display:none;">
@@ -131,19 +180,18 @@
 
     <div id="groupPage" style="display:none;">
         <h2>Group Messages</h2>
-        <div id="groupHistory" style="border:1px solid #ccc; padding:10px; height:200px; overflow:auto;"></div>
-        <input type="text" id="groupMessageInput" placeholder="Enter message">
-        <button onclick="sendGroupMessage()">Send Message</button>
-        <button onclick="generateInviteLink()">Generate Invite Link</button>
-        <button onclick="goToMainPage()">Back to Main</button>
-
-        <h3 id="groupManagement" style="display:none;">Group Management (Owner Only)</h3>
         <div id="groupManagement" style="display:none;">
+            <h3>Group Management</h3>
             <button onclick="addModerator()">Add Moderator</button>
             <button onclick="kickFromGroup()">Kick User</button>
             <button onclick="banFromGroup()">Ban User</button>
             <button onclick="muteInGroup()">Mute User</button>
+            <button onclick="ShowInviteLink()">Show Invite Link</button>
         </div>
+        <div id="groupHistory" style="border:1px solid #ccc; padding:10px; height:200px; overflow:auto;"></div>
+        <input type="text" id="groupMessageInput" placeholder="Enter message">
+        <button onclick="sendGroupMessage()">Send Message</button>
+        <button onclick="updateGroupList()">Back to groups</button>
     </div>
 
     <div id="profilePage" style="display:none;">
@@ -164,12 +212,21 @@
         <button onclick="goToMainPage()">Back to Main</button>
     </div>
 
+    <div class="popup-overlay" id="profilePopup">
+        <div class="popup-content">
+            <button class="popup-close" onclick="closePopup()">&times;</button>
+            <iframe id="profileFrame" src=""></iframe>
+        </div>
+    </div>
+
     <script>
         let ws;
         let username = '';
         let isAdmin = false;
         let isOwner = false;
         let lastRecipient = '';
+        let id ='';
+        let isGOwner = false;
 
         function getWebSocketURL() {
             const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -201,7 +258,7 @@
                 ws.send(JSON.stringify({ type: 'login', username, password }));
             };
 
-            ws.onmessage = handleMessage;
+            ws.onmessage = handleMessage; // Delegate message handling to handleMessage
         }
 
         function handleMessage(event) {
@@ -211,8 +268,8 @@
                 alert(data.message);
             } else if (data.type === 'login-success') {
                 // Display the new ID format in the idDisplay section
-                document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
-                document.cookie = `authToken=${data.id}; path=/; expires=${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toUTCString()}`;
+                id = data.id; // Store the ID for later use
+                document.getElementById('idDisplay').innerText = `Your ID: ${id}`;
                 document.getElementById('authSection').style.display = 'none';
                 document.getElementById('chatSection').style.display = 'block';
                 isAdmin = data.isAdmin;
@@ -221,7 +278,7 @@
             } else if (data.type === 'register-success') {
                 alert('Registration successful. Please log in.');
             } else if (data.type === 'chat') {
-                appendMessage(`${data.username}: ${data.message}`);
+                appendMessage(`${data.username}: ${data.message}`, data.avatarurl);
             } else if (data.type === 'dm') {
                 if (data.from === lastRecipient || data.to === lastRecipient) {
                     appendDMHistory(`${data.from}: ${data.message}`);
@@ -240,6 +297,8 @@
                 handleProfileData(data);
             } else if (data.type === 'success' && data.message === 'Profile updated successfully.') {
                 alert('Profile updated successfully!');
+            } else if (data.type === 'profile-request') {
+                openPopup(data.profileUrl);
             }
         }
 
@@ -247,17 +306,8 @@
             const adminTools = document.getElementById('adminTools');
             const groupManagement = document.getElementById('groupManagement');
 
-            if (isAdmin || isOwner) {
-                adminTools.style.display = 'block';
-            } else {
-                adminTools.style.display = 'none';
-            }
-
-            if (isOwner) {
-                groupManagement.style.display = 'block';
-            } else {
-                groupManagement.style.display = 'none';
-            }
+            adminTools.style.display = (isAdmin || isOwner) ? 'block' : 'none';
+            groupManagement.style.display = isGOwner ? 'block' : 'none';
         }
 
         function sendMessage() {
@@ -266,7 +316,7 @@
 
             if (target && target !== username) {
                 ws.send(JSON.stringify({ type: 'dm', to: target, message: msg }));
-                appendMessage(`(DM to ${target}): ${msg}`);
+                // appendMessage(`(DM to ${target}): ${msg}`); // Remove local append to avoid duplication
             } else {
                 ws.send(JSON.stringify({ type: 'chat', message: msg }));
             }
@@ -274,9 +324,27 @@
             document.getElementById('messageInput').value = '';
         }
 
-        function appendMessage(msg) {
+        function appendMessage(msg, avatarUrl) {
             const box = document.getElementById('chatBox');
-            box.innerHTML += `<p>${msg}</p>`;
+            const messageElement = document.createElement('div');
+            messageElement.style.display = 'flex';
+            messageElement.style.alignItems = 'center';
+            messageElement.style.marginBottom = '10px';
+
+            const avatar = document.createElement('img');
+            avatar.src = avatarUrl || 'images/stock/OIP (3).jpeg'; // Use user avatar or fallback
+            avatar.alt = 'Avatar';
+            avatar.style.width = '30px';
+            avatar.style.height = '30px';
+            avatar.style.borderRadius = '50%';
+            avatar.style.marginRight = '10px';
+
+            const text = document.createElement('p');
+            text.textContent = msg;
+
+            messageElement.appendChild(avatar);
+            messageElement.appendChild(text);
+            box.appendChild(messageElement);
             box.scrollTop = box.scrollHeight;
         }
 
@@ -288,6 +356,104 @@
                     ul.innerHTML += `<li>${user}</li>`;
                 }
             });
+
+            // Request user groups to populate groupOptions
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get-user-groups' }));
+            }
+        }
+
+        // Populate groupOptions with user's groups
+        function updateGroupList(groups) {
+            const groupList = document.getElementById('groupList');
+            groupList.innerHTML = '';
+            groups.forEach(group => {
+                const li = document.createElement('li');
+                li.textContent = group.name;
+                li.style.cursor = 'pointer';
+                li.onclick = () => {
+                    // Instead of opening group chat directly, set currentGroupId and go to groupPage as chatroom
+                    currentGroupId = group.id;
+                    document.getElementById('groupOptions').style.display = 'none';
+                    document.getElementById('chatSection').style.display = 'none';
+                    document.getElementById('dmPage').style.display = 'none';
+                    document.getElementById('groupPage').style.display = 'block';
+
+                    // Clear and prepare group chat history and input
+                    document.getElementById('groupHistory').innerHTML = '';
+                    document.getElementById('groupMessageInput').value = '';
+
+                    // Request group messages from server
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'get-group-messages', groupId: currentGroupId }));
+                    }
+
+                    // Update group page header with group name
+                    document.querySelector('#groupPage h2').textContent = `Group Messages - ${group.name}`;
+                };
+                groupList.appendChild(li);
+            });
+
+            document.getElementById('groupOptions').style.display = 'block';
+            // Hide original menu (dmTarget user list) and chatSection
+            document.getElementById('dmTarget').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'none';
+            document.getElementById('groupPage').style.display = 'none';
+        
+        }
+
+        // Send group message
+        function sendGroupMessage() {
+            const message = document.getElementById('groupMessageInput').value.trim();
+            if (!message || !currentGroupId) return;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'send-group-message', groupId: currentGroupId, message }));
+                // appendGroupHistory(`You: ${message}`); // Remove local append to avoid duplication, server will send message back
+                document.getElementById('groupMessageInput').value = '';
+            }
+        }
+
+        // Append message to group chat history
+        function appendGroupHistory(message) {
+            const groupHistory = document.getElementById('groupHistory');
+
+            // Check if the message contains an image URL or a Tenor GIF URL
+            const imageRegex = /(https?:\/\/.+\.(?:png|jpg|jpeg|gif))/i;
+            const tenorRegex = /(https?:\/\/tenor\.com\/view\/.+)/i;
+
+            if (imageRegex.test(message)) {
+                const img = document.createElement('img');
+                img.src = message.match(imageRegex)[0];
+                img.alt = 'Embedded Image';
+                img.style.maxWidth = '100%';
+                img.style.marginTop = '10px';
+                groupHistory.appendChild(img);
+            } else if (tenorRegex.test(message)) {
+                const iframe = document.createElement('iframe');
+                iframe.src = message.match(tenorRegex)[0];
+                iframe.width = '100%';
+                iframe.height = '200';
+                iframe.style.border = 'none';
+                iframe.allow = 'autoplay';
+                groupHistory.appendChild(iframe);
+            } else {
+                const messageElement = document.createElement('p');
+                messageElement.textContent = message;
+                groupHistory.appendChild(messageElement);
+            }
+
+            groupHistory.scrollTop = groupHistory.scrollHeight;
+        }
+
+        // Create a new group chat
+        function createGroupChat() {
+            const groupName = prompt('Enter a name for the new group:');
+            if (!groupName) return;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'create-group', name: groupName }));
+            }
         }
 
         function banUser() {
@@ -351,20 +517,33 @@
 
         function goToGroupPage() {
             document.getElementById('authSection').style.display = 'none';
-            document.getElementById('chatSection').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'none'; // Hide chatSection
             document.getElementById('dmPage').style.display = 'none'; // Ensure DM page is hidden
-            document.getElementById('groupPage').style.display = 'block';
+            document.getElementById('groupPage').style.display = 'none'; // Hide groupPage
+
+            // Show groupOptions to display list of groups
+            document.getElementById('groupOptions').style.display = 'block';
+
+            // Clear group list (optional)
+            const groupList = document.getElementById('groupList');
+            groupList.innerHTML = '';
+
+            // Request user groups to populate groupOptions
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get-user-groups' }));
+            }
         }
 
         function goToMainPage() {
             document.getElementById('dmPage').style.display = 'none';
             document.getElementById('groupPage').style.display = 'none';
             document.getElementById('chatSection').style.display = 'block';
+            document.getElementById('profilePage').style.display = 'none';
         }
 
         function goToProfilePage() {
-            const profileUrl = `?profile=Nubert-${usernameToNumbers(username)}-nuberT`;
-            window.location.href = profileUrl;
+            const profileUrl = `/users?profile=${id}`; // Construct the profile URL dynamically
+            openPopup(profileUrl); // Open the profile in the popup
         }
 
         function goToProfileSettings() {
@@ -483,9 +662,9 @@
             groupHistory.scrollTop = groupHistory.scrollHeight;
         }
 
-        function generateInviteLink() {
-            // Logic to generate invite link for the group
-            alert('Invite link generated: [link]');
+        function ShowInviteLink() {
+            invitelsiasdn = "nothing right now lmaooooo"
+            alert(`Invite link generated: ${invitelsiasdn}`);
         }
 
         function addModerator() {
@@ -541,6 +720,20 @@
                     }
                 };
             }
+        }
+
+        function openPopup(profileUrl) {
+            const popup = document.getElementById('profilePopup');
+            const iframe = document.getElementById('profileFrame');
+            iframe.src = profileUrl;
+            popup.style.display = 'flex';
+        }
+
+        function closePopup() {
+            const popup = document.getElementById('profilePopup');
+            const iframe = document.getElementById('profileFrame');
+            iframe.src = '';
+            popup.style.display = 'none';
         }
 
         window.onload = autoLogin;
