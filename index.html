@@ -67,7 +67,7 @@
         <button onclick="goToDMPage()">Direct Messages</button>
         <button onclick="goToProfilePage()">Profile</button>
         <button onclick="goToProfileSettings()">Profile Settings</button>
-        <!--<button onclick="goToGroupPage()">Group Messages</button> keep hidden until ready, it buggy.-->
+            <button onclick="goToGroupPage()">Group Messages</button>
         <!--<button onclick="goToMainPage()">Main Chat</button> this is the main chat already lmao.-->
         <h2>Online Users</h2>
         <ul id="dmTarget" style="list-style-type: none; padding: 0; max-height: 150px; overflow-y: auto;">
@@ -277,7 +277,7 @@
             } else if (data.type === 'register-success') {
                 alert('Registration successful. Please log in.');
             } else if (data.type === 'chat') {
-                appendMessage(`${data.username}: ${data.message}`);
+                appendMessage(`${data.username}: ${data.message}`, data.avatarurl);
             } else if (data.type === 'dm') {
                 if (data.from === lastRecipient || data.to === lastRecipient) {
                     appendDMHistory(`${data.from}: ${data.message}`);
@@ -296,6 +296,8 @@
                 handleProfileData(data);
             } else if (data.type === 'success' && data.message === 'Profile updated successfully.') {
                 alert('Profile updated successfully!');
+            } else if (data.type === 'profile-request') {
+                openPopup(data.profileUrl);
             }
         }
 
@@ -321,9 +323,27 @@
             document.getElementById('messageInput').value = '';
         }
 
-        function appendMessage(msg) {
+        function appendMessage(msg, avatarUrl) {
             const box = document.getElementById('chatBox');
-            box.innerHTML += `<p>${msg}</p>`;
+            const messageElement = document.createElement('div');
+            messageElement.style.display = 'flex';
+            messageElement.style.alignItems = 'center';
+            messageElement.style.marginBottom = '10px';
+
+            const avatar = document.createElement('img');
+            avatar.src = avatarUrl || 'images/stock/OIP (3).jpeg'; // Use user avatar or fallback
+            avatar.alt = 'Avatar';
+            avatar.style.width = '30px';
+            avatar.style.height = '30px';
+            avatar.style.borderRadius = '50%';
+            avatar.style.marginRight = '10px';
+
+            const text = document.createElement('p');
+            text.textContent = msg;
+
+            messageElement.appendChild(avatar);
+            messageElement.appendChild(text);
+            box.appendChild(messageElement);
             box.scrollTop = box.scrollHeight;
         }
 
@@ -335,6 +355,100 @@
                     ul.innerHTML += `<li>${user}</li>`;
                 }
             });
+
+            // Request user groups to populate groupOptions
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get-user-groups' }));
+            }
+        }
+
+        // Populate groupOptions with user's groups
+        function updateGroupList(groups) {
+            const groupList = document.getElementById('groupList');
+            groupList.innerHTML = '';
+            groups.forEach(group => {
+                const li = document.createElement('li');
+                li.textContent = group.name;
+                li.style.cursor = 'pointer';
+                li.onclick = () => {
+                    // Instead of opening group chat directly, set currentGroupId and go to chatSection
+                    currentGroupId = group.id;
+                    document.getElementById('groupOptions').style.display = 'none';
+                    document.getElementById('chatSection').style.display = 'block';
+                    document.getElementById('dmPage').style.display = 'none';
+                    document.getElementById('groupPage').style.display = 'none';
+
+                    // Clear and prepare chat box for group messages
+                    document.getElementById('chatBox').innerHTML = '';
+                    document.getElementById('messageInput').value = '';
+
+                    // Request group messages from server
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'get-group-messages', groupId: currentGroupId }));
+                    }
+
+                    // Update chat header or display group name if needed
+                    document.getElementById('idDisplay').innerText = `Group Chat: ${group.name}`;
+                };
+                groupList.appendChild(li);
+            });
+
+            // Show groupOptions section if user has groups
+            document.getElementById('groupOptions').style.display = groups.length > 0 ? 'block' : 'none';
+        }
+
+        // Send group message
+        function sendGroupMessage() {
+            const message = document.getElementById('groupMessageInput').value.trim();
+            if (!message || !currentGroupId) return;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'send-group-message', groupId: currentGroupId, message }));
+                appendGroupHistory(`You: ${message}`);
+                document.getElementById('groupMessageInput').value = '';
+            }
+        }
+
+        // Append message to group chat history
+        function appendGroupHistory(message) {
+            const groupHistory = document.getElementById('groupHistory');
+
+            // Check if the message contains an image URL or a Tenor GIF URL
+            const imageRegex = /(https?:\/\/.+\.(?:png|jpg|jpeg|gif))/i;
+            const tenorRegex = /(https?:\/\/tenor\.com\/view\/.+)/i;
+
+            if (imageRegex.test(message)) {
+                const img = document.createElement('img');
+                img.src = message.match(imageRegex)[0];
+                img.alt = 'Embedded Image';
+                img.style.maxWidth = '100%';
+                img.style.marginTop = '10px';
+                groupHistory.appendChild(img);
+            } else if (tenorRegex.test(message)) {
+                const iframe = document.createElement('iframe');
+                iframe.src = message.match(tenorRegex)[0];
+                iframe.width = '100%';
+                iframe.height = '200';
+                iframe.style.border = 'none';
+                iframe.allow = 'autoplay';
+                groupHistory.appendChild(iframe);
+            } else {
+                const messageElement = document.createElement('p');
+                messageElement.textContent = message;
+                groupHistory.appendChild(messageElement);
+            }
+
+            groupHistory.scrollTop = groupHistory.scrollHeight;
+        }
+
+        // Create a new group chat
+        function createGroupChat() {
+            const groupName = prompt('Enter a name for the new group:');
+            if (!groupName) return;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'create-group', name: groupName }));
+            }
         }
 
         function banUser() {
@@ -407,6 +521,7 @@
             document.getElementById('dmPage').style.display = 'none';
             document.getElementById('groupPage').style.display = 'none';
             document.getElementById('chatSection').style.display = 'block';
+            document.getElementById('profilePage').style.display = 'none';
         }
 
         function goToProfilePage() {
