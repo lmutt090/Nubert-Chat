@@ -7,6 +7,11 @@ const fs = require('fs');
 const readline = require('readline');
 const express = require('express');
 const app = express();
+const fetch = require('node-fetch'); // Import node-fetch for HTTP requests
+const crypto = require('crypto'); // Add this at the top of the file
+const url = 'http://localhost:3000'; // Fallback to localhost with default port
+
+const webhookURL = 'https://your.webhook.url/here'; // Replace with your webhook URL
 
 const server = http.createServer();
 const wss = new WebSocket.Server({ server });
@@ -15,7 +20,7 @@ const clients = new Map(); // username => ws
 const dbPath = path.join(__dirname, 'NubNub.db');
 const isFirstRun = !fs.existsSync(dbPath);
 let whitelistEnabled = true;
-let localTunnelEnabled = 'true'; // Enable LocalTunnel if the environment variable is set
+let localTunnelEnabled = false; // Enable LocalTunnel if the environment variable is set
 
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
@@ -30,45 +35,62 @@ const db = new sqlite3.Database(dbPath, (err) => {
             message TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )`);
-        db.run(`CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            bio TEXT DEFAULT '',
-            avatar_url TEXT DEFAULT '',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            password TEXT,
-            is_admin INTEGER DEFAULT 0,
-            is_owner INTEGER DEFAULT 0,
-            is_banned INTEGER DEFAULT 0,
-            is_muted INTEGER DEFAULT 0,
-            is_whitelisted INTEGER DEFAULT 0,
-            is_user_able_to_access_profiles INTEGER DEFAULT 0
-        )`, (err) => {
-            if (err) {
-                console.error('Error creating users table:', err);
-            } else {
-                console.log('Users table created or already exists.');
-            }
-            // Update the user creation logic to generate a random 20-digit ID
-            if (isFirstRun) {
-                const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-                rl.question('Set owner username: ', username => {
-                    rl.question('Set owner password: ', password => {
-                        const randomId = Math.floor(10 ** 19 + Math.random() * 9 * 10 ** 19); // Generate a random 20-digit number
-                        bcrypt.hash(password, 10, (err, hash) => {
-                            if (!err) {
-                                db.run(`INSERT INTO users (id, username, password, is_admin, is_owner, is_whitelisted) VALUES (?, ?, ?, 1, 1, 1)`, [randomId, username, hash], () => {
-                                    console.log('Owner account created with ID:', randomId);
+        // Update the users table to remove AUTOINCREMENT from the id column
+        const updateUsersTableQuery = `
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                bio TEXT DEFAULT '',
+                avatar_url TEXT DEFAULT 'images/stock/OIP (3).jpeg',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                password TEXT,
+                is_admin INTEGER DEFAULT 0,
+                is_owner INTEGER DEFAULT 0,
+                is_banned INTEGER DEFAULT 0,
+                is_muted INTEGER DEFAULT 0,
+                is_whitelisted INTEGER DEFAULT 0,
+                is_user_bannable INTEGER DEFAULT 1
+            )
+        `;
+
+        db.serialize(() => {
+            db.exec(updateUsersTableQuery, (err) => {
+                if (err) {
+                    console.error('Error updating users table schema:', err);
+                } else {
+                    console.log('Users table schema updated successfully.');
+                }
+            });
+        });
+
+        if (isFirstRun) {
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+            rl.question('Set owner username: ', username => {
+                rl.question('Set owner password: ', password => {
+                    // Replace the random ID generation logic with hashing
+                    bcrypt.hash(password, 10, (err, hash) => {
+                        if (!err) {
+                            db.run(`INSERT INTO users (username, password, is_admin, is_owner, is_whitelisted) VALUES (?, ?, 1, 1, 1)`, [username, hash], () => {
+                                console.log('Owner account created with username:', username);
+                                db.get(`SELECT id FROM users WHERE username = ?`, [username], (err, row) => {
+                                    if (err) {
+                                        console.error('Error fetching owner ID:', err);
+                                        rl.close();
+                                        return;
+                                    }
+                                    const Id = row.id; // Use the fetched ID
+                                    console.log('Owner account created with ID:', Id);
                                     rl.close();
                                 });
-                            }
-                        });
+                            });
+                        }
                     });
                 });
-            }
-        });
+            });
+        }
     }
 });
+
 
 function usernameToNumbers(username) {
     return username.split('').map(char => char.charCodeAt(0)).join('');
@@ -87,30 +109,43 @@ const groupDataDb = new sqlite3.Database(groupDataPath, (err) => {
             id TEXT PRIMARY KEY,
             name TEXT,
             description TEXT,
-            join_paused INTEGER DEFAULT 0
+            join_paused INTEGER DEFAULT 0,
+            invite_token TEXT UNIQUE
         )`);
+        groupDataDb.run(`CREATE TABLE IF NOT EXISTS members (
+            username TEXT,
+            group_id TEXT,
+            is_moderator INTEGER DEFAULT 0,
+            PRIMARY KEY (username, group_id)
+        )`);
+        // No separate group DBs, messages stored in tables per group below
     }
 });
 
-function getGroupDb(groupId) {
-    const groupDbPath = path.join(groupsFolder, `${groupId}.db`);
-    const groupDb = new sqlite3.Database(groupDbPath, (err) => {
+// Remove getGroupDb function as no separate DBs per group
+
+// Helper function to get messages table name for a group
+function getGroupMessagesTableName(groupId) {
+    // Sanitize groupId to be safe as table name
+    return `messages_${groupId.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+}
+
+// Create messages table for a group if not exists
+function ensureGroupMessagesTable(groupId) {
+    const tableName = getGroupMessagesTableName(groupId);
+    const createTableSQL = `
+        CREATE TABLE IF NOT EXISTS ${tableName} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender TEXT,
+            message TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `;
+    groupDataDb.run(createTableSQL, (err) => {
         if (err) {
-            console.error(`Could not connect to group database for group ${groupId}`, err);
-        } else {
-            groupDb.run(`CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sender TEXT,
-                message TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )`);
-            groupDb.run(`CREATE TABLE IF NOT EXISTS members (
-                username TEXT PRIMARY KEY,
-                is_moderator INTEGER DEFAULT 0
-            )`);
+            console.error(`Error creating messages table for group ${groupId}:`, err);
         }
     });
-    return groupDb;
 }
 
 // Add support for listing DM history
@@ -162,25 +197,141 @@ wss.on('connection', (ws) => {
         else if (data.type === 'get-user-groups') {
             if (user) {
                 getUserGroups(user, (groups) => {
-                    ws.send(JSON.stringify({ type: 'user-groups', groups }));
+                    // Send only group id and name for listing
+                    const groupList = groups.map(g => ({ id: g.id, name: g.name }));
+                    ws.send(JSON.stringify({ type: 'user-groups', groups: groupList }));
                 });
             }
         }
 
+        else if (data.type === 'create-group') {
+            if (!user) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Not authenticated' }));
+                return;
+            }
+            const groupName = data.name;
+            if (!groupName) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Group name is required' }));
+                return;
+            }
+            // Generate a unique group ID (e.g., UUID or hash)
+            const groupId = crypto.randomBytes(8).toString('hex');
+
+        // Generate a unique invite token
+        const inviteToken = crypto.randomBytes(6).toString('hex');
+
+        // Insert group into groups table with invite token
+        groupDataDb.run(`INSERT INTO groups (id, name, invite_token) VALUES (?, ?, ?)`, [groupId, groupName, inviteToken], function(err) {
+            if (err) {
+                console.error('Error creating group:', err);
+                ws.send(JSON.stringify({ type: 'error', message: 'Failed to create group' }));
+                return;
+            }
+            // Add creator as member and owner (owner status can be managed in members table or separate)
+            groupDataDb.run(`INSERT INTO members (username, group_id, is_moderator) VALUES (?, ?, 1)`, [user, groupId], function(err) {
+                if (err) {
+                    console.error('Error adding creator to group members:', err);
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to add creator to group' }));
+                    return;
+                }
+                ws.send(JSON.stringify({ type: 'group-created', group: { id: groupId, name: groupName, inviteToken } }));
+            });
+        });
+        }
+
+        else if (data.type === 'get-group-messages') {
+            if (!user) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Not authenticated' }));
+                return;
+            }
+            const groupId = data.groupId;
+            if (!groupId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Group ID is required' }));
+                return;
+            }
+            // Check if user is member of the group
+            groupDataDb.get(`SELECT * FROM members WHERE username = ? AND group_id = ?`, [user, groupId], (err, row) => {
+                if (err || !row) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Access denied or not a member of the group' }));
+                    return;
+                }
+                // Ensure messages table exists for group
+                ensureGroupMessagesTable(groupId);
+                const tableName = getGroupMessagesTableName(groupId);
+                groupDataDb.all(`SELECT sender, message, timestamp FROM ${tableName} ORDER BY timestamp ASC LIMIT 100`, [], (err, rows) => {
+                    if (err) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch group messages' }));
+                        return;
+                    }
+                    ws.send(JSON.stringify({ type: 'group-messages', groupId, messages: rows }));
+                });
+            });
+        }
+
+        else if (data.type === 'send-group-message') {
+            if (!user) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Not authenticated' }));
+                return;
+            }
+            const groupId = data.groupId;
+            const messageText = data.message;
+            if (!groupId || !messageText) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Group ID and message are required' }));
+                return;
+            }
+            // Check if user is member of the group
+            groupDataDb.get(`SELECT * FROM members WHERE username = ? AND group_id = ?`, [user, groupId], (err, row) => {
+                if (err || !row) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Access denied or not a member of the group' }));
+                    return;
+                }
+                // Ensure messages table exists for group
+                ensureGroupMessagesTable(groupId);
+                const tableName = getGroupMessagesTableName(groupId);
+                groupDataDb.run(`INSERT INTO ${tableName} (sender, message) VALUES (?, ?)`, [user, messageText], function(err) {
+                    if (err) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to send group message' }));
+                        return;
+                    }
+                    // Broadcast message to all group members who are connected
+                    groupDataDb.all(`SELECT username FROM members WHERE group_id = ?`, [groupId], (err, members) => {
+                        if (err) {
+                            console.error('Error fetching group members:', err);
+                            return;
+                        }
+                        members.forEach(member => {
+                            const memberWs = clients.get(member.username);
+                            if (memberWs && memberWs.readyState === WebSocket.OPEN) {
+                                memberWs.send(JSON.stringify({ type: 'group-message', groupId, sender: user, message: messageText }));
+                            }
+                        });
+                    });
+                });
+            });
+        }
+
         else if (data.type === 'register') {
             const { username, password } = data;
+
+            if (!username || !password) {
+                return ws.send(JSON.stringify({ type: 'error', message: 'Username and password are required' }));
+            }
+
             bcrypt.hash(password, 10, (err, hash) => {
                 if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Error hashing password' }));
-                } else {
-                    db.run(`INSERT INTO users (username, password, is_whitelisted) VALUES (?, ?, 1)`, [username, hash], function(err) {
-                        if (err) {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Username (possibly) already taken' }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'register-success', username }));
-                        }
-                    });
+                    console.error('Error hashing password:', err);
+                    return ws.send(JSON.stringify({ type: 'error', message: 'Internal server error' }));
                 }
+
+                db.run(`INSERT INTO users (username, password, is_whitelisted) VALUES (?, ?, 1)`, [username, hash], function(err) {
+                    if (err) {
+                        console.error('Error inserting user:', err);
+                        return ws.send(JSON.stringify({ type: 'error', message: 'Username may already be taken' }));
+                    }
+                    const Id = this.lastID; // Use the last inserted ID
+                    console.log('User account created with ID:', Id);
+                    ws.send(JSON.stringify({ message: 'User registered successfully', id: Id })); // Send response to WebSocket client
+                });
             });
         }
 
@@ -201,7 +352,7 @@ wss.on('connection', (ws) => {
                             isOwner = row.is_owner === 1;
                             isMuted = row.is_muted === 1;
                             clients.set(user, ws);
-                            const id = `Nubert-${usernameToNumbers(user)}-nuberT`;
+                            id = row.id;
                             ws.send(JSON.stringify({ type: 'login-success', id, isAdmin, isOwner }));
                             broadcastUserList();
                         } else {
@@ -214,9 +365,8 @@ wss.on('connection', (ws) => {
 
         else if (data.type === 'auto-login') {
             const token = data.token;
-            const username = token.split('-')[1]; // Extract username from token
 
-            db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, row) => {
+            db.get(`SELECT * FROM users WHERE id = ?`, [token], (err, row) => {
                 if (err || !row) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Invalid token or user not found.' }));
                 } else if (row.is_banned) {
@@ -224,13 +374,47 @@ wss.on('connection', (ws) => {
                 } else if (whitelistEnabled && row.is_whitelisted !== 1) {
                     ws.send(JSON.stringify({ type: 'error', message: 'You are not whitelisted.' }));
                 } else {
-                    user = username;
+                    user = row.username;
                     isAdmin = row.is_admin === 1;
                     isOwner = row.is_owner === 1;
                     isMuted = row.is_muted === 1;
                     clients.set(user, ws);
                     ws.send(JSON.stringify({ type: 'login-success', id: token, isAdmin, isOwner }));
                     broadcastUserList();
+                }
+            });
+        }
+
+        else if (data.type === 'get-profile') {
+            if (!user) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Not authenticated' }));
+                return;
+            }
+            const requestedUsername = data.username || user;
+            db.get(`SELECT username, bio, avatar_url FROM users WHERE username = ?`, [requestedUsername], (err, row) => {
+                if (err) {
+                    console.error('Error fetching profile:', err);
+                    ws.send(JSON.stringify({ type: 'error', message: 'Internal server error' }));
+                } else if (!row) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Profile not found' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'profile-data', profile: row }));
+                }
+            });
+        }
+
+        else if (data.type === 'update-profile') {
+            if (!user) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Not authenticated' }));
+                return;
+            }
+            const { bio, avatar_url } = data;
+            db.run(`UPDATE users SET bio = ?, avatar_url = ? WHERE username = ?`, [bio || '', avatar_url || '', user], function(err) {
+                if (err) {
+                    console.error('Error updating profile:', err);
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'update-profile-success', message: 'Profile updated successfully' }));
                 }
             });
         }
@@ -249,11 +433,19 @@ wss.on('connection', (ws) => {
             if (data.message.startsWith('/')) {
                 handleCommand(data.message, user, ws);
             } else {
-                db.run(`INSERT INTO messages (type, sender, message) VALUES (?, ?, ?)`, ['chat', user, data.message]);
-                wss.clients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({ type: 'chat', username: user, message: data.message }));
+                db.get(`SELECT id, avatar_url FROM users WHERE username = ?`, [user], (err, row) => {
+                    if (err || !row) {
+                        console.error('Error fetching user info:', err);
+                        return;
                     }
+                    db.run(`INSERT INTO messages (type, sender, message) VALUES (?, ?, ?)`, ['chat', user, data.message]);
+
+                    // Broadcast to WebSocket clients
+                    wss.clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify({ type: 'chat', username: user, message: data.message, avatarurl: row.avatar_url}));
+                        }
+                    });
                 });
             }
         }
@@ -265,216 +457,7 @@ wss.on('connection', (ws) => {
                 target.send(JSON.stringify({ type: 'dm', from: user, message: data.message }));
             }
         }
-
-        else if (data.type === 'fetch-dm-messages') {
-            const { targetUser } = data;
-            if (user) {
-                db.all(
-                    `SELECT sender, receiver, message, timestamp FROM messages WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?) ORDER BY timestamp ASC`,
-                    [user, targetUser, targetUser, user],
-                    (err, rows) => {
-                        if (err) {
-                            console.error('Error fetching DM messages:', err);
-                            ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch messages.' }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'dm-messages', targetUser, messages: rows }));
-                        }
-                    }
-                );
-            }
-        }
-
-        else if (data.type === 'kick' && (isAdmin || isOwner)) {
-            const target = clients.get(data.target);
-            if (target && target.readyState === WebSocket.OPEN) {
-                target.send(JSON.stringify({ type: 'kicked', message: 'You have been kicked by a moderator.' }));
-                target.close();
-            }
-        }
-
-        else if (data.type === 'ban' && (isAdmin || isOwner)) {
-            db.run(`UPDATE users SET is_banned = 1 WHERE username = ?`, [data.target]);
-            const target = clients.get(data.target);
-            if (target) target.close();
-        }
-
-        else if (data.type === 'unban' && (isAdmin || isOwner)) {
-            db.run(`UPDATE users SET is_banned = 0 WHERE username = ?`, [data.target]);
-        }
-
-        else if (data.type === 'mute' && (isAdmin || isOwner)) {
-            db.run(`UPDATE users SET is_muted = 1 WHERE username = ?`, [data.target]);
-        }
-
-        else if (data.type === 'unmute' && (isAdmin || isOwner)) {
-            db.run(`UPDATE users SET is_muted = 0 WHERE username = ?`, [data.target]);
-        }
-
-        else if (data.type === 'set-admin' && isOwner) {
-            db.get(`SELECT * FROM users WHERE username = ?`, [data.target], (err, row) => {
-                if (err || !row || row.is_owner === 1) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Cannot promote this user.' }));
-                } else {
-                    db.run(`UPDATE users SET is_admin = 1 WHERE username = ?`, [data.target], function(err) {
-                        if (err) {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Could not promote user.' }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'admin-update', message: `${data.target} is now an admin.` }));
-                        }
-                    });
-                }
-            });
-        }
-
-        else if (data.type === 'remove-admin' && isOwner) {
-            db.get(`SELECT * FROM users WHERE username = ?`, [data.target], (err, row) => {
-                if (err || !row || row.is_owner === 1) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Cannot demote this user.' }));
-                } else {
-                    db.run(`UPDATE users SET is_admin = 0 WHERE username = ?`, [data.target], function(err) {
-                        if (err) {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Could not demote user.' }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'admin-update', message: `${data.target} is no longer an admin.` }));
-                        }
-                    });
-                }
-            });
-        }
-
-        else if (data.type === 'create-group' && isOwner) {
-            const { groupId, name, description } = data;
-            groupDataDb.run(`INSERT INTO groups (id, name, description) VALUES (?, ?, ?)`, [groupId, name, description], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Group creation failed.' }));
-                } else {
-                    getGroupDb(groupId); // Initialize the group database
-                    ws.send(JSON.stringify({ type: 'group-created', groupId }));
-                }
-            });
-        }
-
-        else if (data.type === 'send-group-message') {
-            const { groupId, message } = data;
-            const groupDb = getGroupDb(groupId);
-            groupDb.run(`INSERT INTO messages (sender, message) VALUES (?, ?)`, [user, message]);
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'group-message', groupId, sender: user, message }));
-                }
-            });
-        }
-
-        else if (data.type === 'toggle-join-pause' && isOwner) {
-            const { groupId, pause } = data;
-            groupDataDb.run(`UPDATE groups SET join_paused = ? WHERE id = ?`, [pause ? 1 : 0, groupId], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to toggle join pause.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'join-pause-toggled', groupId, paused: pause }));
-                }
-            });
-        }
-
-        else if (data.type === 'add-moderator' && isOwner) {
-            const { groupId, target } = data;
-            const groupDb = getGroupDb(groupId);
-            groupDb.run(`UPDATE members SET is_moderator = 1 WHERE username = ?`, [target], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to add moderator.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'moderator-added', groupId, target }));
-                }
-            });
-        }
-
-        else if (data.type === 'kick-from-group' && isOwner) {
-            const { groupId, target } = data;
-            const groupDb = getGroupDb(groupId);
-            groupDb.run(`DELETE FROM members WHERE username = ?`, [target], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to kick user.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'user-kicked', groupId, target }));
-                }
-            });
-        }
-
-        else if (data.type === 'ban-from-group' && isOwner) {
-            const { groupId, target } = data;
-            const groupDb = getGroupDb(groupId);
-            groupDb.run(`INSERT OR REPLACE INTO members (username, is_moderator) VALUES (?, 0)`, [target], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to ban user.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'user-banned', groupId, target }));
-                }
-            });
-        }
-
-        else if (data.type === 'mute-in-group' && isOwner) {
-            const { groupId, target } = data;
-            const groupDb = getGroupDb(groupId);
-            groupDb.run(`INSERT OR REPLACE INTO members (username, is_moderator) VALUES (?, 0)`, [target], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to mute user.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'user-muted', groupId, target }));
-                }
-            });
-        }
-
-        else if (data.type === 'block') {
-            const { targetUser } = data;
-            if (user && targetUser) {
-                db.run(`INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)`, [user, targetUser], (err) => {
-                    if (err) {
-                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to block user.' }));
-                    } else {
-                        ws.send(JSON.stringify({ type: 'success', message: `${targetUser} has been blocked.` }));
-                    }
-                });
-            }
-        }
-
-        else if (data.type === 'unblock') {
-            const { targetUser } = data;
-            if (user && targetUser) {
-                db.run(`DELETE FROM blocks WHERE blocker = ? AND blocked = ?`, [user, targetUser], (err) => {
-                    if (err) {
-                        ws.send(JSON.stringify({ type: 'error', message: 'Failed to unblock user.' }));
-                    } else {
-                        ws.send(JSON.stringify({ type: 'success', message: `${targetUser} has been unblocked.` }));
-                    }
-                });
-            }
-        }
-
-        // Handle profile-related WebSocket messages
-        if (data.type === 'get-profile') {
-            db.get(`SELECT username, bio, avatar_url FROM users WHERE username = ?`, [user], (err, row) => {
-                if (err || !row) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch profile.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'profile-data', profile: row }));
-                }
-            });
-        } else if (data.type === 'update-profile') {
-            const { bio, avatar_url } = data;
-            db.run(`UPDATE users SET bio = ?, avatar_url = ? WHERE username = ?`, [bio, avatar_url, user], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'success', message: 'Profile updated successfully.' }));
-                }
-            });
-        }
-    }); // Fixed closing braces and parentheses
-
-    ws.on('close', () => {
-        clients.delete(user);
-        broadcastUserList();
-    });
+    }); // Ensure proper closure of the WebSocket message handler
 });
 
 function broadcastUserList() {
@@ -490,26 +473,153 @@ function broadcastUserList() {
 // Use the Express app to handle HTTP requests
 server.on('request', app);
 
-// Update the endpoint to fetch profile by ID instead of decoding username
+app.use(express.urlencoded({ extended: true }));
+
+app.get('/invite', (req, res) => {
+    const inviteToken = req.query.invite;
+    if (!inviteToken) {
+        return res.status(400).send('<h1>Error: Invite token is required</h1>');
+    }
+
+    // Check if invite token exists and get group ID
+    groupDataDb.get(`SELECT id, name FROM groups WHERE invite_token = ?`, [inviteToken], (err, group) => {
+        if (err) {
+            console.error('Error fetching group by invite token:', err);
+            return res.status(500).send('<h1>Internal Server Error</h1>');
+        }
+        if (!group) {
+            return res.status(404).send('<h1>Invalid or expired invite link</h1>');
+        }
+
+        // Serve login form for invite
+        return res.send(`
+            <h1>Login to Join Group "${group.name}"</h1>
+            <form method="POST" action="/invite?invite=${inviteToken}">
+                <input type="text" name="username" placeholder="Username" required /><br/>
+                <input type="password" name="password" placeholder="Password" required /><br/>
+                <button type="submit">Login and Join</button>
+            </form>
+        `);
+    });
+});
+
+app.post('/invite', (req, res) => {
+    const inviteToken = req.query.invite;
+    if (!inviteToken) {
+        return res.status(400).send('<h1>Error: Invite token is required</h1>');
+    }
+    const { username, password } = req.body;
+    if (!username || !password) {
+        return res.status(400).send('<h1>Username and password are required</h1>');
+    }
+
+    // Authenticate user
+    db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, row) => {
+        if (err || !row) {
+            return res.status(401).send('<h1>Invalid username or password</h1>');
+        }
+        bcrypt.compare(password, row.password, (err, result) => {
+            if (result) {
+                // Add user to group members if not already a member
+                groupDataDb.get(`SELECT id, name FROM groups WHERE invite_token = ?`, [inviteToken], (err, group) => {
+                    if (err || !group) {
+                        return res.status(400).send('<h1>Invalid or expired invite token</h1>');
+                    }
+                    groupDataDb.get(`SELECT * FROM members WHERE username = ? AND group_id = ?`, [username, group.id], (err, member) => {
+                        if (err) {
+                            console.error('Error checking group membership:', err);
+                            return res.status(500).send('<h1>Internal Server Error</h1>');
+                        }
+                        if (member) {
+                            return res.send(`<h1>You are already a member of group "${group.name}"</h1>`);
+                        }
+                        groupDataDb.run(`INSERT INTO members (username, group_id) VALUES (?, ?)`, [username, group.id], (err) => {
+                            if (err) {
+                                console.error('Error adding user to group:', err);
+                                return res.status(500).send('<h1>Internal Server Error</h1>');
+                            }
+                            res.send(`<h1>Successfully joined group "${group.name}"</h1>`);
+                        });
+                    });
+                });
+            } else {
+                res.status(401).send('<h1>Invalid username or password</h1>');
+            }
+        });
+    });
+});
+
+// Update the endpoint to fetch profile by ID and serve an HTML page
 app.get('/users', (req, res) => {
     const profileId = req.query.profile;
 
     if (!profileId) {
-        return res.status(400).json({ error: 'Profile parameter is required' });
+        return res.status(400).send('<h1>Error: Profile ID is required</h1>');
     }
 
     db.get(`SELECT username, bio, avatar_url FROM users WHERE id = ?`, [profileId], (err, row) => {
         if (err) {
             console.error('Error fetching profile:', err);
-            return res.status(500).json({ error: 'Internal server error' });
+            return res.status(500).send('<h1>Internal Server Error</h1>');
         }
 
         if (!row) {
-            console.log(`No profile found for ID: ${profileId}`); // Debug log
-            return res.status(404).json({ error: 'Profile not found' });
+            console.log(`No profile found for ID: ${profileId}`);
+            return res.status(404).send('<h1>Profile Not Found</h1>');
         }
 
-        res.json(row);
+        // Render the profile page directly
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>${row.username}'s Profile</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        margin: 0;
+                        padding: 0;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        background-color: #f4f4f4;
+                    }
+                    .profile-container {
+                        background: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                        text-align: center;
+                        width: 300px;
+                    }
+                    .profile-container img {
+                        border-radius: 50%;
+                        width: 100px;
+                        height: 100px;
+                        object-fit: cover;
+                    }
+                    .profile-container h1 {
+                        font-size: 24px;
+                        margin: 10px 0;
+                    }
+                    .profile-container p {
+                        color: #666;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="profile-container">
+                    <img src="${row.avatar_url || 'default-avatar.png'}" alt="User Avatar">
+                    <h1>${row.username}</h1>
+                    <p>${row.bio || 'No bio available.'}</p>
+                    <p>https://${url}/users?profile=${profileId}</p>
+                </div>
+            </body>
+            </html>
+        `);
     });
 });
 
@@ -517,6 +627,14 @@ app.get('/users', (req, res) => {
 app.use(express.static(__dirname));
 
 server.listen(3000, () => console.log('Server running on port 3000'));
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error('Port 3000 is already in use. Please free the port and try again.');
+    } else {
+        console.error('Server error:', err);
+    }
+});
 
 if (localTunnelEnabled) {
     const localtunnel = require('localtunnel');
@@ -562,47 +680,76 @@ function handleCommand(command, user, ws) {
                 }
             });
             break;
-        case 'block':
-            const blockTarget = args[0];
-            if (!blockTarget) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user to block.' }));
+        // case 'block':
+        //     const blockTarget = args[0];
+        //     if (!blockTarget) {
+        //         ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user to block.' }));
+        //         return;
+        //     }
+        //     db.run(`INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)`, [user, blockTarget], (err) => {
+        //         if (err) {
+        //             ws.send(JSON.stringify({ type: 'error', message: 'Failed to block user.' }));
+        //         } else {
+        //             ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have blocked ${blockTarget}.` }));
+        //         }
+        //     });
+        //     break;
+        // case 'unblock':
+        //     const unblockTarget = args[0];
+        //     if (!unblockTarget) {
+        //         ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user to unblock.' }));
+        //         return;
+        //     }
+        //     db.run(`DELETE FROM blocks WHERE blocker = ? AND blocked = ?`, [user, unblockTarget], (err) => {
+        //         if (err) {
+        //             ws.send(JSON.stringify({ type: 'error', message: 'Failed to unblock user.' }));
+        //         } else {
+        //             ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have unblocked ${unblockTarget}.` }));
+        //         }
+        //     });
+        //     break;
+        //case 'profile-access':
+        //    db.get(`SELECT is_user_able_to_access_profiles FROM users WHERE username = ?`, [user], (err, row) => {
+        //        if (err || !row) {
+        //            ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch profile access status.' }));
+        //        } else {
+        //            const newValue = row.is_user_able_to_access_profiles === 1 ? 0 : 1;
+        //            db.run(`UPDATE users SET is_user_able_to_access_profiles = ? WHERE username = ?`, [newValue, user], (err) => {
+        //                if (err) {
+        //                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile access.' }));
+        //                } else {
+        //                    ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `Your profile access is now set to ${newValue ? 'on' : 'off'}.` }));
+        //                }
+        //            });
+        //        }
+        //    });
+        //    break;
+        case 'profile':
+            const pfusername = args[0];
+            if (!pfusername) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user.' }));
                 return;
             }
-            db.run(`INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)`, [user, blockTarget], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to block user.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have blocked ${blockTarget}.` }));
-                }
-            });
-            break;
-        case 'unblock':
-            const unblockTarget = args[0];
-            if (!unblockTarget) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user to unblock.' }));
-                return;
-            }
-            db.run(`DELETE FROM blocks WHERE blocker = ? AND blocked = ?`, [user, unblockTarget], (err) => {
-                if (err) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to unblock user.' }));
-                } else {
-                    ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `You have unblocked ${unblockTarget}.` }));
-                }
-            });
-            break;
-        case 'profile-access':
-            db.get(`SELECT is_user_able_to_access_profiles FROM users WHERE username = ?`, [user], (err, row) => {
+            db.get(`SELECT id FROM users WHERE username = ?`, [pfusername], (err, row) => {
                 if (err || !row) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch profile access status.' }));
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch profile or user may not exist.' }));
                 } else {
-                    const newValue = row.is_user_able_to_access_profiles === 1 ? 0 : 1;
-                    db.run(`UPDATE users SET is_user_able_to_access_profiles = ? WHERE username = ?`, [newValue, user], (err) => {
-                        if (err) {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Failed to update profile access.' }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `Your profile access is now set to ${newValue ? 'on' : 'off'}.` }));
-                        }
-                    });
+                    ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `http://${url}/users?profile=${row.id}` }));
+                    ws.send(JSON.stringify({ type: 'chat', username: 'System', message: `use "/profile-view ${pfusername}" to view the profile in the popup` }));
+                }
+            });
+            break;
+        case 'profile-view':
+            const pfusername2 = args[0];
+            if (!pfusername2) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Please specify a user.' }));
+                return;
+            }
+            db.get(`SELECT id FROM users WHERE username = ?`, [pfusername2], (err, row) => {
+                if (err || !row) {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Failed to fetch profile or user may not exist.' }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'profile-request', profileUrl: `/users?profile=${row.id}` }));
                 }
             });
             break;
