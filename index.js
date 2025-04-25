@@ -7,6 +7,9 @@ const fs = require('fs');
 const readline = require('readline');
 const express = require('express');
 const app = express();
+const fetch = require('node-fetch'); // Make sure to install node-fetch if not already
+
+const webhookURL = 'https://your.webhook.url/here'; // Replace with your webhook URL
 
 const server = http.createServer();
 const wss = new WebSocket.Server({ server });
@@ -201,7 +204,7 @@ wss.on('connection', (ws) => {
                             isOwner = row.is_owner === 1;
                             isMuted = row.is_muted === 1;
                             clients.set(user, ws);
-                            const id = `Nubert-${usernameToNumbers(user)}-nuberT`;
+                            id = row.id
                             ws.send(JSON.stringify({ type: 'login-success', id, isAdmin, isOwner }));
                             broadcastUserList();
                         } else {
@@ -214,9 +217,8 @@ wss.on('connection', (ws) => {
 
         else if (data.type === 'auto-login') {
             const token = data.token;
-            const username = token.split('-')[1]; // Extract username from token
 
-            db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, row) => {
+            db.get(`SELECT * FROM users WHERE id = ?`, [username], (err, row) => {
                 if (err || !row) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Invalid token or user not found.' }));
                 } else if (row.is_banned) {
@@ -245,16 +247,49 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'error', message: 'You are muted and cannot chat.' }));
                 return;
             }
-
+        
             if (data.message.startsWith('/')) {
                 handleCommand(data.message, user, ws);
             } else {
                 db.run(`INSERT INTO messages (type, sender, message) VALUES (?, ?, ?)`, ['chat', user, data.message]);
+        
+                // Broadcast to WebSocket clients
                 wss.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN) {
                         client.send(JSON.stringify({ type: 'chat', username: user, message: data.message }));
                     }
                 });
+        
+                // Send to webhook
+                if (webhookURL.includes('discord.com/api/webhooks')) {
+                    // Discord webhook with embed
+                    fetch(webhookURL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            embeds: [{
+                                title: 'New Chat Message',
+                                fields: [
+                                    { name: 'User', value: user, inline: true },
+                                    { name: 'Message', value: data.message, inline: false }
+                                ],
+                                timestamp: new Date().toISOString()
+                            }]
+                        })
+                    }).catch(err => console.error('Error sending to Discord webhook:', err));
+                } else {
+                    // Generic webhook
+                    fetch(webhookURL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            type: 'chat',
+                            user: user,
+                            message: data.message,
+                            timestamp: new Date().toISOString()
+                        })
+                    }).catch(err => console.error('Error sending to webhook:', err));
+                }
             }
         }
 

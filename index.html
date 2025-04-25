@@ -212,7 +212,6 @@
             } else if (data.type === 'login-success') {
                 // Display the new ID format in the idDisplay section
                 document.getElementById('idDisplay').innerText = `Your ID: ${data.id}`;
-                document.cookie = `authToken=${data.id}; path=/; expires=${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toUTCString()}`;
                 document.getElementById('authSection').style.display = 'none';
                 document.getElementById('chatSection').style.display = 'block';
                 isAdmin = data.isAdmin;
@@ -247,17 +246,8 @@
             const adminTools = document.getElementById('adminTools');
             const groupManagement = document.getElementById('groupManagement');
 
-            if (isAdmin || isOwner) {
-                adminTools.style.display = 'block';
-            } else {
-                adminTools.style.display = 'none';
-            }
-
-            if (isOwner) {
-                groupManagement.style.display = 'block';
-            } else {
-                groupManagement.style.display = 'none';
-            }
+            adminTools.style.display = (isAdmin || isOwner) ? 'block' : 'none';
+            groupManagement.style.display = isGOwner ? 'block' : 'none';
         }
 
         function sendMessage() {
