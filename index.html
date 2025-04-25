@@ -316,7 +316,7 @@
 
             if (target && target !== username) {
                 ws.send(JSON.stringify({ type: 'dm', to: target, message: msg }));
-                appendMessage(`(DM to ${target}): ${msg}`);
+                // appendMessage(`(DM to ${target}): ${msg}`); // Remove local append to avoid duplication
             } else {
                 ws.send(JSON.stringify({ type: 'chat', message: msg }));
             }

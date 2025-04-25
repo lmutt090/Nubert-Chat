@@ -61,6 +61,32 @@ _Refer to [Quickly Get Started](#quickly-get-started) if you prefer a faster set
    node index.js
    ```
 
+# Resource Footprint
+
+One of the highlights of Nubert Chat is its exceptionally lightweight system requirements:
+
+- Disk Usage: ~51.27 MiB
+
+- RAM Usage: ~19.55 MiB
+
+This makes it ideal for:
+
+- Embedded systems
+
+- Low-spec virtual machines
+
+- Vintage or retro hardware
+
+- Minimalist deployments
+
+You could run it on systems as low-end as:
+
+- A Raspberry Pi Zero
+
+- A retro Pentium or 486 PC
+
+- Virtual machines with just 64 MB RAM and 100 MB disk
+
 ## Contributing
 
 Contributions are welcome! Feel free to fork the repository and submit a pull request.
