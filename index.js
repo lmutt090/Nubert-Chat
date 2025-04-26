@@ -79,7 +79,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
                                         return;
                                     }
                                     const Id = row.id; // Use the fetched ID
-                                    console.log('Owner account created with ID:', Id);
+                                    console.log('Owner account created with ID:', Id || "Unknown ID");
                                     rl.close();
                                 });
                             });
@@ -658,7 +658,30 @@ function handleCommand(command, user, ws) {
 
     switch (cmd.toLowerCase()) {
         case 'help':
-            ws.send(JSON.stringify({ type: 'chat', username: 'System', message: 'Available commands: /help, /whisper <user> <message>, /me <action>, /block <user>, /unblock, <user>' }));
+            db.get(`SELECT username FROM users WHERE is_owner = 1`, (err, row) => {
+                if (err) {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Failed to check owner status.'
+                    }));
+                    return;
+                }
+            
+                const isOwner = row && user === row.username;
+            
+                const baseCommands = ['/help', '/whisper [user] [message]', '/me [action]'];
+                const ownerCommands = ['/admin [user]', '/unadmin [user]'];
+            
+                const commandList = isOwner
+                    ? baseCommands.concat(ownerCommands)
+                    : baseCommands;
+            
+                ws.send(JSON.stringify({
+                    type: 'chat',
+                    username: 'System',
+                    message: `Available commands: ${commandList.join(', ')}`
+                }));
+            });
             break;
         case 'whisper':
             const targetUser = args.shift();
@@ -757,3 +780,13 @@ function handleCommand(command, user, ws) {
             ws.send(JSON.stringify({ type: 'error', message: 'Unknown command. Type /help for a list of commands.' }));
     }
 }
+
+
+// command pallet
+/*
+ws.send(JSON.stringify({
+    type: 'chat',
+    username: 'System',
+    message: 'message lmafoooooooooooooo'
+}));
+*/
