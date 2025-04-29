@@ -658,7 +658,7 @@ function handleCommand(command, user, ws) {
 
     switch (cmd.toLowerCase()) {
         case 'help':
-            ws.send(JSON.stringify({ type: 'chat', username: 'System', message: 'Available commands: /help, /whisper <user> <message>, /me <action>, /block <user>, /unblock, <user>' }));
+            ws.send(JSON.stringify({ type: 'chat', username: 'System', message: 'Available commands: /help, /whisper <user> <message>, /me <action>, /block <user>, /unblock <user>, /flip, /ping, /dice <dice type>' }));
             break;
         case 'whisper':
             const targetUser = args.shift();
@@ -753,6 +753,47 @@ function handleCommand(command, user, ws) {
                 }
             });
             break;
+            case 'ping':
+                const latency = Date.now() - (ws.lastPingTimestamp || Date.now());
+                ws.send(JSON.stringify({
+                    type: 'chat',
+                    username: 'System',
+                    message: `🏓 Pong! Latency: ${latency}ms`
+                }));
+                break;
+    
+            case 'flip':
+                const flipResult = Math.random() < 0.5 ? 'Heads' : 'Tails';
+                ws.send(JSON.stringify({
+                    type: 'chat',
+                    username: 'System',
+                    message: `${user} flipped a coin: ${flipResult}`
+                }));
+                break;
+    
+            case 'dice': {
+                const popularDice = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
+                const type = args[0]?.toLowerCase() || 'd6';
+                const count = Math.min(parseInt(args[1]) || 1, 20); // Max 20 dice to prevent spam
+    
+                if (!popularDice.includes(type)) {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: `Invalid dice type. Choose one of: ${popularDice.join(', ')}.`
+                    }));
+                    return;
+                }
+    
+                const sides = parseInt(type.slice(1));
+                const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+    
+                ws.send(JSON.stringify({
+                    type: 'chat',
+                    username: 'System',
+                    message: `${user} rolled ${count} ${type}: ${rolls.join(', ')}`
+                }));
+                break;
+            }    
         default:
             ws.send(JSON.stringify({ type: 'error', message: 'Unknown command. Type /help for a list of commands.' }));
     }
