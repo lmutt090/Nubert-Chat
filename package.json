@@ -1,6 +1,6 @@
 {
     "name": "nubert-chat",
-    "version": "0.2.2",
+    "version": "0.2.4",
     "main": "index.js",
     "dependencies": {
         "bcrypt": "^5.1.0",
