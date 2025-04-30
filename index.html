@@ -448,11 +448,100 @@
 
         // Create a new group chat
         function createGroupChat() {
-            const groupName = prompt('Enter a name for the new group:');
-            if (!groupName) return;
+            openredirectpopup("https://github.com/lmutt090/Nubert-Chat", "Go here to create your own.")
+        }
 
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'create-group', name: groupName }));
+        function joinnewgroupchat(websocketforchat, samelogin) {
+            if (samelogin === true) {
+                window.alert("oh, same login is on, guess we gotta use the same login info")
+            }
+            window.alert("uhh, it wont work because we gotta make this")
+        }
+        
+        // Custom popup menu to replace openredirectpopup function
+        function openredirectpopup(POPUPURL, note = '') {
+            const popup = document.getElementById('redirectPopup');
+            const urlDisplay = document.getElementById('redirectPopupUrl');
+            const trustedMessage = document.getElementById('redirectPopupTrustedMessage');
+            const Note = document.getElementById('redirectPopupNote')
+            urlDisplay.textContent = POPUPURL;
+
+            // Determine if URL is trusted
+            let trusted = false;
+            let inviteInfo = '';
+            try {
+                const urlObj = new URL(POPUPURL);
+                const hostname = urlObj.hostname.toLowerCase();
+                const pathname = urlObj.pathname;
+
+                // Specific checks for Lmutt090 URLs
+                if (
+                    (hostname === 'github.com' && pathname.startsWith('/lmutt090/')) ||
+                    hostname === 'lmutt090.github.io' ||
+                    (hostname === 'aetherx-discord-bot.github.io' && pathname.startsWith('/'))
+                ) {
+                    trusted = true;
+                    if (hostname === 'lmutt090.github.io') {
+                        inviteInfo = 'This website is owned by Lmutt090 (the creator).';
+                    } else {
+                        inviteInfo = 'This URL is affiliated with Lmutt090 (the creator).';
+                    }
+                } else {
+                    const trustedDomains = [
+                        'google.com',
+                        'microsoft.com',
+                        'yahoo.com',
+                        'github.com',
+                        'aetherx-discord-bot.github.io'
+                    ];
+
+                    // Check if hostname ends with any trusted domain
+                    trusted = trustedDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain));
+
+                    // Special handling for discord domains
+                    if (hostname === 'discord.gg') {
+                        trusted = true;
+                        inviteInfo = 'Note: This is a Discord invite link.';
+                    } else if (hostname.endsWith('.discord.gg')) {
+                        trusted = true;
+                        inviteInfo = 'Note: This is a Discord invite link.';
+                    }
+                }
+            } catch (e) {
+                // Invalid URL, treat as untrusted
+                trusted = false;
+            }
+
+            if (note) {
+                Note.textContent =  note;
+            } 
+            
+            if (trusted) {
+                trustedMessage.textContent = inviteInfo || 'This is a trusted URL.';
+                trustedMessage.style.color = 'green';
+            } else {
+                trustedMessage.textContent = 'Warning: This URL is not from a trusted domain.';
+                trustedMessage.style.color = 'red';
+            }
+
+            popup.style.display = 'flex';
+
+            // Store the URL in a data attribute for use when clicking Open
+            popup.dataset.url = POPUPURL;
+        }
+
+        function closeRedirectPopup() {
+            const popup = document.getElementById('redirectPopup');
+            popup.style.display = 'none';
+            popup.dataset.url = '';
+        }
+
+        function openUrlFromPopup() {
+            const popup = document.getElementById('redirectPopup');
+            const url = popup.dataset.url;
+            if (url) {
+                window.open(url, '_blank');
+                closeRedirectPopup();
             }
         }
 
@@ -738,5 +827,20 @@
 
         window.onload = autoLogin;
     </script>
+
+    <!-- Custom redirect popup menu -->
+    <div class="popup-overlay" id="redirectPopup" style="display:none; justify-content:center; align-items:center;">
+        <div class="popup-content" style="position: relative; max-width: 400px;">
+            <button class="popup-close" onclick="closeRedirectPopup()">&times;</button>
+            <p>Do you want to open this link?</p>
+            <p id="redirectPopupUrl" style="word-break: break-all; font-weight: bold;"></p>
+            <p id="redirectPopupTrustedMessage" style="font-weight: bold; margin-top: 10px;"></p>
+            <p id="redirectPopupNote" style="font-style: italic; margin-top: 10px; color: #333;"></p>
+            <div style="margin-top: 20px;">
+                <button onclick="openUrlFromPopup()" style="margin-right: 10px; padding: 8px 16px; border:none; background-color: #4CAF50; color: white; border-radius: 4px; cursor: pointer;">Open</button>
+                <button onclick="closeRedirectPopup()" style="padding: 8px 16px; border:none; background-color: #f44336; color: white; border-radius: 4px; cursor: pointer;">Cancel</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
