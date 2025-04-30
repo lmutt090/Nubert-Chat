@@ -260,8 +260,15 @@
 
         function login() {
             username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
+            password = document.getElementById('password').value;
             ws = new WebSocket(getWebSocketURL());
+            if (username === '') {
+                alert('Username cannot be empty.');
+                return;
+            } else if (password === '') {
+                alert('Password cannot be empty.');
+                return;
+            }
 
             ws.onopen = () => {
                 ws.send(JSON.stringify({ type: 'login', username, password }));
