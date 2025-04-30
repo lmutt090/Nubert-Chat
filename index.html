@@ -258,10 +258,9 @@
             ws.onmessage = handleMessage;
         }
 
-        function login() {
+        function login(onsite = true) {
             username = document.getElementById('username').value;
             password = document.getElementById('password').value;
-            ws = new WebSocket(getWebSocketURL());
             if (username === '') {
                 alert('Username cannot be empty.');
                 return;
@@ -269,15 +268,18 @@
                 alert('Password cannot be empty.');
                 return;
             }
+            if (onsite === true) {
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({ type: 'login', username, password }));
 
-            ws.onopen = () => {
-                ws.send(JSON.stringify({ type: 'login', username, password }));
-
-                // Store login credentials in cookies
-                document.cookie = `authUsername=${username}; path=/`;
-                document.cookie = `authPassword=${password}; path=/`;
-            };
-
+                    // Store login credentials in cookies
+                    document.cookie = `authUsername=${username}; path=/`;
+                    document.cookie = `authPassword=${password}; path=/`;
+                };   
+            } else {
+                console.log('Using existing WebSocket connection for login.');
+                window.alert('There is no support at the moment.');
+            }
             ws.onmessage = handleMessage; // Delegate message handling to handleMessage
         }
 
