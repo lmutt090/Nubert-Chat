@@ -96,6 +96,7 @@
         <ul id="groupList" style="list-style-type: none; padding: 0; max-height: 100px; overflow-y: auto;">
             <!-- Group chats will be dynamically added here -->
         </ul>
+        <button onclick="joinnewgroupchat(prompt('Enter WebSocket URL for the group chat:'), confirm('Use same login credentials?'))">Join New Group Chat</button>
         <button onclick="createGroupChat()">Create Group Chat</button>
     </div>
 
@@ -256,6 +257,10 @@
 
             ws.onopen = () => {
                 ws.send(JSON.stringify({ type: 'login', username, password }));
+
+                // Store login credentials in cookies
+                document.cookie = `authUsername=${username}; path=/`;
+                document.cookie = `authPassword=${password}; path=/`;
             };
 
             ws.onmessage = handleMessage; // Delegate message handling to handleMessage
@@ -367,39 +372,50 @@
         function updateGroupList(groups) {
             const groupList = document.getElementById('groupList');
             groupList.innerHTML = '';
-            groups.forEach(group => {
+
+            // Retrieve WebSocket URLs from cookies
+            const existingUrls = document.cookie.split('; ').find(row => row.startsWith('websocketUrls='));
+            const urls = existingUrls ? existingUrls.split('=')[1].split(',') : [];
+
+            urls.forEach(url => {
                 const li = document.createElement('li');
-                li.textContent = group.name;
+                li.textContent = url;
                 li.style.cursor = 'pointer';
                 li.onclick = () => {
-                    // Instead of opening group chat directly, set currentGroupId and go to groupPage as chatroom
-                    currentGroupId = group.id;
-                    document.getElementById('groupOptions').style.display = 'none';
-                    document.getElementById('chatSection').style.display = 'none';
-                    document.getElementById('dmPage').style.display = 'none';
-                    document.getElementById('groupPage').style.display = 'block';
-
-                    // Clear and prepare group chat history and input
-                    document.getElementById('groupHistory').innerHTML = '';
-                    document.getElementById('groupMessageInput').value = '';
-
-                    // Request group messages from server
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'get-group-messages', groupId: currentGroupId }));
-                    }
-
-                    // Update group page header with group name
-                    document.querySelector('#groupPage h2').textContent = `Group Messages - ${group.name}`;
+                    alert(`Connected WebSocket URL: ${url}`);
                 };
                 groupList.appendChild(li);
             });
 
+            if (groups) {
+                groups.forEach(group => {
+                    const li = document.createElement('li');
+                    li.textContent = group.name;
+                    li.style.cursor = 'pointer';
+                    li.onclick = () => {
+                        currentGroupId = group.id;
+                        document.getElementById('groupOptions').style.display = 'none';
+                        document.getElementById('chatSection').style.display = 'none';
+                        document.getElementById('dmPage').style.display = 'none';
+                        document.getElementById('groupPage').style.display = 'block';
+
+                        document.getElementById('groupHistory').innerHTML = '';
+                        document.getElementById('groupMessageInput').value = '';
+
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'get-group-messages', groupId: currentGroupId }));
+                        }
+
+                        document.querySelector('#groupPage h2').textContent = `Group Messages - ${group.name}`;
+                    };
+                    groupList.appendChild(li);
+                });
+            }
+
             document.getElementById('groupOptions').style.display = 'block';
-            // Hide original menu (dmTarget user list) and chatSection
             document.getElementById('dmTarget').style.display = 'none';
             document.getElementById('chatSection').style.display = 'none';
             document.getElementById('groupPage').style.display = 'none';
-        
         }
 
         // Send group message
@@ -452,10 +468,50 @@
         }
 
         function joinnewgroupchat(websocketforchat, samelogin) {
-            if (samelogin === true) {
-                window.alert("oh, same login is on, guess we gotta use the same login info")
+            if (!websocketforchat) {
+                alert("WebSocket URL is required.");
+                return;
             }
-            window.alert("uhh, it wont work because we gotta make this")
+
+            const cookies = document.cookie.split('; ').reduce((acc, cookie) => {
+                const [key, value] = cookie.split('=');
+                acc[key] = value;
+                return acc;
+            }, {});
+
+            const username = samelogin ? cookies.authUsername : prompt("Enter new username:");
+            const password = samelogin ? cookies.authPassword : prompt("Enter new password:");
+
+            if (!username || !password) {
+                alert("Username and password are required.");
+                return;
+            }
+
+            const newWs = new WebSocket(websocketforchat);
+
+            newWs.onopen = () => {
+                newWs.send(JSON.stringify({ type: 'login', username, password }));
+
+                if (!samelogin) {
+                    // Update cookies with new login info
+                    document.cookie = `authUsername=${username}; path=/`;
+                    document.cookie = `authPassword=${password}; path=/`;
+                }
+
+                alert("Connected to new WebSocket and logged in successfully.");
+
+                // Store the WebSocket URL in cookies for future reference
+                const existingUrls = document.cookie.split('; ').find(row => row.startsWith('websocketUrls='));
+                const urls = existingUrls ? existingUrls.split('=')[1].split(',') : [];
+                if (!urls.includes(websocketforchat)) {
+                    urls.push(websocketforchat);
+                    document.cookie = `websocketUrls=${urls.join(',')}; path=/`;
+                }
+            };
+
+            newWs.onerror = (error) => {
+                alert("Failed to connect to the WebSocket: " + error.message);
+            };
         }
         
         // Custom popup menu to replace openredirectpopup function

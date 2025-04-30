@@ -10,6 +10,9 @@ const app = express();
 const fetch = require('node-fetch'); // Import node-fetch for HTTP requests
 const crypto = require('crypto'); // Add this at the top of the file
 const url = 'http://localhost:3000'; // Fallback to localhost with default port
+const { productname: packageName, version: packageVersion } = require('./package.json');
+const serverName = 'NubNub'; // Default server name, change as wished.
+const serverStorage = 'Show all messages on connection'; // Default server storage setting, change as wished
 
 const webhookURL = 'https://your.webhook.url/here'; // Replace with your webhook URL
 
@@ -237,6 +240,11 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'group-created', group: { id: groupId, name: groupName, inviteToken } }));
             });
         });
+        }
+
+        else if (data.type === 'request-server-info') {
+            ws.send(JSON.stringify({
+            }));
         }
 
         else if (data.type === 'get-group-messages') {
