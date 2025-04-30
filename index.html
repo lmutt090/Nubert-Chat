@@ -96,8 +96,8 @@
         <ul id="groupList" style="list-style-type: none; padding: 0; max-height: 100px; overflow-y: auto;">
             <!-- Group chats will be dynamically added here -->
         </ul>
-        <button onclick="joinnewgroupchat(prompt('Enter WebSocket URL for the group chat:'), confirm('Use same login credentials?'))">Join New Group Chat</button>
-        <button onclick="createGroupChat()">Create Group Chat</button>
+        <button onclick="joinnewgroupchat(prompt('Enter WebSocket URL for the group chat:'), confirm('Use same login credentials?'))">Join Server</button>
+        <button onclick="createGroupChat()">Create Server</button>
     </div>
 
     <div id="dmPage" style="display:none;">
@@ -223,6 +223,7 @@
     <script>
         let ws;
         let username = '';
+        let password = '';
         let isAdmin = false;
         let isOwner = false;
         let lastRecipient = '';
@@ -240,8 +241,15 @@
 
         function register() {
             username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
+            password = document.getElementById('password').value;
             ws = new WebSocket(getWebSocketURL());
+            if (username === '') {
+                alert('Username cannot be empty.');
+                return;
+            } else if (password === '') {
+                alert('Password cannot be empty.');
+                return;
+            }
 
             ws.onopen = () => {
                 ws.send(JSON.stringify({ type: 'register', username, password }));
@@ -289,6 +297,26 @@
                     appendDMHistory(`${data.from}: ${data.message}`);
                 } else {
                     // Ignore messages not related to the current DM recipient
+                }
+            } else if (data.type === 'server-info') {
+                if (data.productName) {
+                    console.log(`Connected to ${data.productName} server.`);
+                } else if (data.productName != 'NubNub') {
+                    const okaywithconnection = confirm('Do you want to connect to this server anyway? This may be malicious, but if you trust the server owner, you can proceed. If you do not want to connect, click Cancel to reload the page.');
+                    if (okaywithconnection) {
+                        console.log(`Connected to ${data.productName} server.`);
+                    } else {
+                        location.reload(); // Reload if user does not want to connect
+                    }
+                } else {
+                    window.alert('Product name not available. Reloading the page.');
+                    location.reload(); // Reload if productName is not available
+                }
+                const serverName = data.serverName || 'Unknown Server';
+                const serverStorage = data.serverStorage || 'Onlineonly';
+
+                if (serverName = 'Unknown Server') {
+                    alert('Server name is not set. Please check the server configuration if this is your server.');
                 }
             } else if (data.type === 'userlist') {
                 updateUserList(data.users);

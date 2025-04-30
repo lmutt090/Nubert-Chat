@@ -10,10 +10,14 @@ const app = express();
 const fetch = require('node-fetch'); // Import node-fetch for HTTP requests
 const crypto = require('crypto'); // Add this at the top of the file
 const url = 'http://localhost:3000'; // Fallback to localhost with default port
-const { productname: packageName, version: packageVersion } = require('./package.json');
-const serverName = 'NubNub'; // Default server name, change as wished.
-const serverStorage = 'Show all messages on connection'; // Default server storage setting, change as wished
-
+const productName = 'NubNub'; // Default product name, change as wished.
+const serverName = 'NubNub Server'; // Default server name, change as wished. IT WILL BE MARKED AS "Unknown Sever" IF BLANK.
+const serverStorage = ''; // Default server storage setting, change as wished.
+/*
+For serverStorage, you can set it to 'all' or 'onlineonly'
+all means all messages are given to the client on connection.
+onlineonly means only messages sent while the client is connected.
+*/
 const webhookURL = 'https://your.webhook.url/here'; // Replace with your webhook URL
 
 const server = http.createServer();
@@ -244,6 +248,10 @@ wss.on('connection', (ws) => {
 
         else if (data.type === 'request-server-info') {
             ws.send(JSON.stringify({
+                type: 'server-info',
+                productName,
+                serverName,
+                serverStorage
             }));
         }
 
